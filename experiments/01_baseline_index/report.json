@@ -1,0 +1,40 @@
+{
+ "pdbbind": {
+  "raw": 19443,
+  "after_leak": 19118,
+  "removed": 325,
+  "hit_ood": 295,
+  "hit_fep": 31,
+  "unique_pdb_raw": 19443,
+  "unique_pdb_after": 19118
+ },
+ "bindingnet": {
+  "raw": 69816,
+  "after_leak": 67989,
+  "removed": 1827,
+  "hit_ood": 1166,
+  "hit_fep": 671,
+  "unique_pdb_raw": 5907,
+  "unique_pdb_after": 5816
+ },
+ "dcs_drop": {
+  "censored": 491,
+  "non_finite_pK": 9,
+  "negative": 0,
+  "unparsable": 0,
+  "no_affinity": 0,
+  "mol2_unreadable": 20,
+  "mol2_missing": 0
+ },
+ "bindingdb_dcs": {
+  "raw": 8822,
+  "after_leak": 8747,
+  "removed": 75,
+  "hit_ood": 8,
+  "hit_fep": 67,
+  "unique_pdb_raw": 1311,
+  "unique_pdb_after": 1302
+ },
+ "baseline_total": 95854,
+ "leak_check_pass": true
+}

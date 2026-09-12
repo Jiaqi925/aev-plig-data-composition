@@ -1,0 +1,10 @@
+{
+ "pdbbind_n": 19118,
+ "pdbbind_smiles_fail": 5,
+ "pdbbind_seq_empty": 0,
+ "hiqbind_n": 30775,
+ "hiqbind_seq_empty": 0,
+ "smiles_unreadable_before_fix": 406,
+ "smiles_recovered_from_mol2": 368,
+ "smiles_final_missing": 38
+}

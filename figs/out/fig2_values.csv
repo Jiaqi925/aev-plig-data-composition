@@ -1,0 +1,7 @@
+source,panel_label,accessions,targets_covered,target_pct,complexes_covered,complex_pct
+PDBbind,PDBbind,4670,60,63.829787234042556,228,77.28813559322035
+HiQBind,HiQBind,2592,43,45.744680851063826,199,67.45762711864407
+Gator(未筛选全量),GatorAffinity-DB (unfiltered),1313,15,15.957446808510639,101,34.23728813559322
+Gator(筛选版100%),GatorAffinity-DB (filtered),1219,15,15.957446808510639,101,34.23728813559322
+PDBbind ∪ HiQBind,PDBbind + HiQBind,5469,61,64.8936170212766,229,77.62711864406779
+PDBbind ∪ HiQBind ∪ Gator,PDBbind + HiQBind + Gator,6226,61,64.8936170212766,229,77.62711864406779

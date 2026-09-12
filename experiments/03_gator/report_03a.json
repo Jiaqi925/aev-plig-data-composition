@@ -1,0 +1,15 @@
+{
+ "raw": 463867,
+ "after_pk": 381291,
+ "structure_dirs": 65001,
+ "missing_structure": 0,
+ "smiles_unparsable": 0,
+ "after_internal_dedup": 54290,
+ "pass_conf": 49720,
+ "seq_empty": 0,
+ "after_clean": 54290,
+ "unique_ligand": 30182,
+ "unique_uniprot": 1326,
+ "unique_scaffold": 11462,
+ "conf_threshold": 0.7
+}

@@ -1,0 +1,20 @@
+{
+ "hiqbind_in": 30775,
+ "pdbbind_ref": 19118,
+ "pdbbind_smiles_missing": 38,
+ "lig_pairs": 5269,
+ "pairs_after_pK": 18234,
+ "tm_pairs": 18234,
+ "tm_fail": 0,
+ "duplicates_removed": 9325,
+ "net_new": 21450,
+ "net_new_unseen_pdb": 11237,
+ "unique_uniprot": 3311,
+ "unique_scaffold": 4957,
+ "thresholds": {
+  "tanimoto": 0.9,
+  "abs_dpK": 1.0,
+  "tm_score": 0.8,
+  "tm_norm": "max(chain1,chain2)"
+ }
+}

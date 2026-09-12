@@ -1,0 +1,14 @@
+{
+ "missing_structure": 0,
+ "leak_removed": {
+  "total": 563,
+  "ood": 521,
+  "fep": 54
+ },
+ "raw": 32275,
+ "after_clean": 30775,
+ "unique_pdb": 17363,
+ "unique_uniprot": 3895,
+ "unique_scaffold": 7580,
+ "res_gt_2p5": 3493
+}

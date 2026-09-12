@@ -1,0 +1,38 @@
+{
+ "thresholds": {
+  "tanimoto": 0.9,
+  "abs_dpK": 1.0,
+  "tm_score": 0.8,
+  "seq_identity": 0.3,
+  "conf": 0.7,
+  "testset_rule": "AND(seqid>=0.30, tanimoto>=0.9) 才剔除；见脚本文档"
+ },
+ "seed": 42,
+ "gator_in": 54290,
+ "step1_pdbid_leak": 66,
+ "step2": {
+  "seq_hit": 15402,
+  "lig_hit": 108,
+  "removed_AND": 94,
+  "would_remove_OR": 15416
+ },
+ "step3": {
+  "ref_pool": 40568,
+  "lig_pairs": 1350,
+  "pairs_after_pK": 5557,
+  "uniq_struct_pairs": 5557,
+  "prescreen_kept": 5557,
+  "prescreen_deferred": 0,
+  "prescreen_audit_n": 0,
+  "prescreen_audit_missed": 0,
+  "tm_fail": 38,
+  "duplicates_removed": 1357
+ },
+ "version_unfiltered": 52773,
+ "version_filtered": 48286,
+ "gator_final_unfiltered": 52773,
+ "gator_final_filtered": 48286,
+ "unique_ligand": 29650,
+ "unique_target": 1472,
+ "unique_scaffold": 11283
+}

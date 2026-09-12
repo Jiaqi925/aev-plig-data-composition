@@ -1,0 +1,82 @@
+{
+ "ood_n_pdb": 295,
+ "ood_n_pdb_mapped": 285,
+ "ood_n_uniprot": 94,
+ "by_uniprot": [
+  {
+   "source": "PDBbind",
+   "n_records": 19118,
+   "n_uniprot_source": 4670,
+   "n_uniprot_ood": 94,
+   "n_intersect": 60,
+   "coverage": 0.6382978723404256
+  },
+  {
+   "source": "HiQBind",
+   "n_records": 21450,
+   "n_uniprot_source": 2592,
+   "n_uniprot_ood": 94,
+   "n_intersect": 43,
+   "coverage": 0.4574468085106383
+  },
+  {
+   "source": "Gator(未筛选全量)",
+   "n_records": 52773,
+   "n_uniprot_source": 1313,
+   "n_uniprot_ood": 94,
+   "n_intersect": 15,
+   "coverage": 0.1595744680851064
+  },
+  {
+   "source": "Gator(筛选版100%)",
+   "n_records": 48286,
+   "n_uniprot_source": 1219,
+   "n_uniprot_ood": 94,
+   "n_intersect": 15,
+   "coverage": 0.1595744680851064
+  },
+  {
+   "source": "PDBbind ∪ HiQBind",
+   "n_records": -1,
+   "n_uniprot_source": 5469,
+   "n_uniprot_ood": 94,
+   "n_intersect": 61,
+   "coverage": 0.648936170212766
+  },
+  {
+   "source": "PDBbind ∪ HiQBind ∪ Gator",
+   "n_records": -1,
+   "n_uniprot_source": 6226,
+   "n_uniprot_ood": 94,
+   "n_intersect": 61,
+   "coverage": 0.648936170212766
+  }
+ ],
+ "by_pdb": [
+  {
+   "source": "PDBbind",
+   "n_ood_pdb": 295,
+   "n_hit": 228,
+   "coverage": 0.7728813559322034
+  },
+  {
+   "source": "HiQBind",
+   "n_ood_pdb": 295,
+   "n_hit": 199,
+   "coverage": 0.6745762711864407
+  },
+  {
+   "source": "Gator(未筛选全量)",
+   "n_ood_pdb": 295,
+   "n_hit": 101,
+   "coverage": 0.3423728813559322
+  },
+  {
+   "source": "Gator(筛选版100%)",
+   "n_ood_pdb": 295,
+   "n_hit": 101,
+   "coverage": 0.3423728813559322
+  }
+ ],
+ "sifts_version": "pdb_chain_uniprot.tsv.gz (PDB 31.26 / UniProt 2026.03)"
+}

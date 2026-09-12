@@ -1,0 +1,73 @@
+# ============================================================
+# Model checkpoints -- 55 x 29 MB = 1.6 GB, hosted on Zenodo
+# ============================================================
+*.pt
+*.pth
+*.ckpt
+
+# ============================================================
+# Third-party datasets -- not ours to redistribute.
+# See README for original sources.
+# ============================================================
+datasets/index/_testsets/
+datasets/structure/
+experiments/04_graphs/
+
+# ============================================================
+# Python artefacts
+# ============================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# ============================================================
+# Environment / editor
+# ============================================================
+.env
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store
+
+# ============================================================
+# Backups and scratch
+# ============================================================
+*.bak
+*.tmp
+*.swp
+*~
+
+# ============================================================
+# Upstream TorchANI resource files -- available from the
+# AEV-PLIG repository, not redistributed here.
+# ============================================================
+AEV-PLIG/torchani_mod/resources/
+AEV-PLIG/torchani_mod/cuaev/
+
+# ============================================================
+# BindingDB-DCS series CSVs -- third-party data.
+# See README for the original source.
+# ============================================================
+datasets/index/_bindingdb_series/
+
+# ============================================================
+# Internal project material -- not for public release
+# ============================================================
+HANDOVER.md
+HANDOVER_zh.md
+PLAN.md
+RESULTS_SUMMARY.md
+report/
+results/
+figs/out/Supplementary_Tables.docx
+
+# ============================================================
+# Run logs -- superseded by history.csv and done.json under
+# experiments/06_train/, and by the report_*.json files.
+# ============================================================
+logs/
+experiments/05_build.log
+experiments/08_audit.log

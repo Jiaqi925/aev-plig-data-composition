@@ -1,0 +1,307 @@
+[
+ {
+  "status": "PASS",
+  "check": "A.PDBbind",
+  "detail": "PLAN 19443 / 实测 19443（差 +0）"
+ },
+ {
+  "status": "PASS",
+  "check": "A.BindingNet",
+  "detail": "PLAN 69816 / 实测 69816（差 +0）"
+ },
+ {
+  "status": "PASS",
+  "check": "A.BindingDB-DCS",
+  "detail": "PLAN 8822 / 实测 8822（差 +0）"
+ },
+ {
+  "status": "PASS",
+  "check": "A.HiQBind",
+  "detail": "PLAN 32275 / 实测 32275（差 +0）"
+ },
+ {
+  "status": "PASS",
+  "check": "A.GatorAffinity(结构数)",
+  "detail": "PLAN 65031 / 实测 65001（差 -30），PLAN 表 1 为约数，差异记入交接文档"
+ },
+ {
+  "status": "PASS",
+  "check": "B.0 剔除集合 = OOD ∪ FEP",
+  "detail": "OOD 295 + FEP 36 → 并集 330，剔除集 330"
+ },
+ {
+  "status": "PASS",
+  "check": "B.pdbbind PDB ID 无泄漏",
+  "detail": "19118 条，命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "B.bindingnet PDB ID 无泄漏",
+  "detail": "67989 条，命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "B.bindingdb_dcs PDB ID 无泄漏",
+  "detail": "8747 条，命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "B.hiqbind PDB ID 无泄漏",
+  "detail": "21450 条，命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "B.gatoraffinity PDB ID 无泄漏",
+  "detail": "52773 条，命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "C.1 计数闭合",
+  "detail": "30775 − 9325 = 21450，文件 21450 行"
+ },
+ {
+  "status": "PASS",
+  "check": "C.2 阈值与 PLAN 一致",
+  "detail": "{'tanimoto': 0.9, 'abs_dpK': 1.0, 'tm_score': 0.8, 'tm_norm': 'max(chain1,chain2)'}"
+ },
+ {
+  "status": "PASS",
+  "check": "C.3 判定为重复的对确实同时满足三判据",
+  "detail": "13761 对，违规 0"
+ },
+ {
+  "status": "PASS",
+  "check": "C.4 被判重的样本已从产物剔除",
+  "detail": "判重 9325 个 uid，残留 0"
+ },
+ {
+  "status": "PASS",
+  "check": "D.1 计数闭合",
+  "detail": "54290 − 66 − 94 − 1357 = 52773，文件 52773 行"
+ },
+ {
+  "status": "PASS",
+  "check": "D.2 同时命中序列+配体的行已剔除",
+  "detail": "AND 命中 94 行，残留 0"
+ },
+ {
+  "status": "PASS",
+  "check": "D.3 读法 A/B 数量已如实记录",
+  "detail": "AND 剔 94，OR 本会剔 15416（差 15322）"
+ },
+ {
+  "status": "PASS",
+  "check": "D.4 跨库判重的对同时满足三判据",
+  "detail": "2774 对，违规 0"
+ },
+ {
+  "status": "PASS",
+  "check": "E.unfiltered 嵌套 30 ⊂ 60 ⊂ 100",
+  "detail": "15832 ⊂ 31664 ⊂ 52773"
+ },
+ {
+  "status": "PASS",
+  "check": "E.unfiltered 比例正确",
+  "detail": "30%: 15832 vs 15832；60%: 31664 vs 31664"
+ },
+ {
+  "status": "PASS",
+  "check": "E.unfiltered 种子 42 可复现",
+  "detail": "重算 15832 条，与产物差 0"
+ },
+ {
+  "status": "PASS",
+  "check": "E.filtered 嵌套 30 ⊂ 60 ⊂ 100",
+  "detail": "14486 ⊂ 28972 ⊂ 48286"
+ },
+ {
+  "status": "PASS",
+  "check": "E.filtered 比例正确",
+  "detail": "30%: 14486 vs 14486；60%: 28972 vs 28972"
+ },
+ {
+  "status": "PASS",
+  "check": "E.filtered 种子 42 可复现",
+  "detail": "重算 14486 条，与产物差 0"
+ },
+ {
+  "status": "PASS",
+  "check": "F 筛选版 = 未筛选 ∩ conf≥0.7",
+  "detail": "未筛选 52773，筛选 48286，conf 通过 48286"
+ },
+ {
+  "status": "PASS",
+  "check": "F.2 筛选版 confidence 全部 ≥ 0.7",
+  "detail": "min=0.7000"
+ },
+ {
+  "status": "PASS",
+  "check": "G.pdbbind pK 全部可解析",
+  "detail": "n=19118 min=0.40 max=15.22 mean=6.362；pK<0 共 0 条，pK>14 共 4 条（PLAN 未要求截断，按原样保留）"
+ },
+ {
+  "status": "PASS",
+  "check": "G.bindingnet pK 全部可解析",
+  "detail": "n=67989 min=0.04 max=14.00 mean=7.163；pK<0 共 0 条，pK>14 共 0 条（PLAN 未要求截断，按原样保留）"
+ },
+ {
+  "status": "PASS",
+  "check": "G.bindingdb_dcs pK 全部可解析",
+  "detail": "n=8747 min=0.90 max=11.00 mean=6.601；pK<0 共 0 条，pK>14 共 0 条（PLAN 未要求截断，按原样保留）"
+ },
+ {
+  "status": "PASS",
+  "check": "G.hiqbind pK 全部可解析",
+  "detail": "n=21450 min=-2.97 max=14.00 mean=6.306；pK<0 共 13 条，pK>14 共 0 条（PLAN 未要求截断，按原样保留）"
+ },
+ {
+  "status": "PASS",
+  "check": "G.gatoraffinity pK 全部可解析",
+  "detail": "n=52773 min=0.00 max=14.22 mean=7.175；pK<0 共 0 条，pK>14 共 1 条（PLAN 未要求截断，按原样保留）"
+ },
+ {
+  "status": "PASS",
+  "check": "H.1 OOD 295 条且 PDB ID 唯一",
+  "detail": "295 条 / 295 个唯一 ID"
+ },
+ {
+  "status": "PASS",
+  "check": "H.2 FEP 42 系列且每系列 n ≥ 10",
+  "detail": "42 系列 / 1087 配体，最小系列 10，最大 87"
+ },
+ {
+  "status": "PASS",
+  "check": "H.3 FEP 配体数 1087（PLAN 写 1089，差 2 为无实验 ΔG 的中间体节点）",
+  "detail": "1087 条"
+ },
+ {
+  "status": "PASS",
+  "check": "I.1 pK = −ΔG / (RT·ln10)",
+  "detail": "RT·ln10 = 1.358985 kcal/mol，最大偏差 1.78e-15"
+ },
+ {
+  "status": "PASS",
+  "check": "J.ood295 维度/指针/唯一性",
+  "detail": "295 图，x(7901, 367) ea(16990, 4) ei(2, 16990)"
+ },
+ {
+  "status": "PASS",
+  "check": "J.fep42 维度/指针/唯一性",
+  "detail": "1087 图，x(30473, 367) ea(66962, 4) ei(2, 66962)"
+ },
+ {
+  "status": "PASS",
+  "check": "J.pdbbind 维度/指针/唯一性",
+  "detail": "18717 图，x(616875, 367) ea(1306150, 4) ei(2, 1306150)"
+ },
+ {
+  "status": "PASS",
+  "check": "J.bindingnet 维度/指针/唯一性",
+  "detail": "67900 图，x(2155840, 367) ea(4726946, 4) ei(2, 4726946)"
+ },
+ {
+  "status": "PASS",
+  "check": "J.bindingdb_dcs 维度/指针/唯一性",
+  "detail": "8747 图，x(234284, 367) ea(505430, 4) ei(2, 505430)"
+ },
+ {
+  "status": "PASS",
+  "check": "J.hiqbind 维度/指针/唯一性",
+  "detail": "21450 图，x(567535, 367) ea(1216104, 4) ei(2, 1216104)"
+ },
+ {
+  "status": "PASS",
+  "check": "J.gatoraffinity 维度/指针/唯一性",
+  "detail": "52761 图，x(1798734, 367) ea(3910082, 4) ei(2, 3910082)"
+ },
+ {
+  "status": "PASS",
+  "check": "K.1 baseline",
+  "detail": "95364 条，来源分布 {'bindingnet': 67900, 'pdbbind': 18717, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.2 baseline+hiqbind",
+  "detail": "116814 条，来源分布 {'bindingnet': 67900, 'hiqbind': 21450, 'pdbbind': 18717, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.3 baseline+gator_filtered_30",
+  "detail": "109843 条，来源分布 {'bindingnet': 67900, 'pdbbind': 18717, 'gatoraffinity': 14479, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.4 baseline+gator_filtered_60",
+  "detail": "124326 条，来源分布 {'bindingnet': 67900, 'gatoraffinity': 28962, 'pdbbind': 18717, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.5 baseline+gator_filtered_100",
+  "detail": "143638 条，来源分布 {'bindingnet': 67900, 'gatoraffinity': 48274, 'pdbbind': 18717, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.6 baseline+gator_unfiltered_30",
+  "detail": "111190 条，来源分布 {'bindingnet': 67900, 'pdbbind': 18717, 'gatoraffinity': 15826, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.7 baseline+gator_unfiltered_60",
+  "detail": "127017 条，来源分布 {'bindingnet': 67900, 'gatoraffinity': 31653, 'pdbbind': 18717, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.8 baseline+gator_unfiltered_100",
+  "detail": "148125 条，来源分布 {'bindingnet': 67900, 'gatoraffinity': 52761, 'pdbbind': 18717, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "K.9 bindingnet+dcs+hiqbind",
+  "detail": "98097 条，来源分布 {'bindingnet': 67900, 'hiqbind': 21450, 'bindingdb_dcs': 8747}"
+ },
+ {
+  "status": "PASS",
+  "check": "L.1 baseline",
+  "detail": "95364 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.2 baseline+hiqbind",
+  "detail": "116814 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.3 baseline+gator_filtered_30",
+  "detail": "109843 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.4 baseline+gator_filtered_60",
+  "detail": "124326 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.5 baseline+gator_filtered_100",
+  "detail": "143638 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.6 baseline+gator_unfiltered_30",
+  "detail": "111190 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.7 baseline+gator_unfiltered_60",
+  "detail": "127017 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.8 baseline+gator_unfiltered_100",
+  "detail": "148125 条：PDB ID 命中 0，unique_id 命中 0"
+ },
+ {
+  "status": "PASS",
+  "check": "L.9 bindingnet+dcs+hiqbind",
+  "detail": "98097 条：PDB ID 命中 0，unique_id 命中 0"
+ }
+]

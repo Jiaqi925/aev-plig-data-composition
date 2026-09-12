@@ -1,0 +1,240 @@
+{
+ "1": {
+  "name": "baseline",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs"
+  ],
+  "n": 95364,
+  "n_before_graph_filter": 95854,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "pdbbind": 18717,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "2": {
+  "name": "baseline+hiqbind",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs",
+   "hiqbind"
+  ],
+  "n": 116814,
+  "n_before_graph_filter": 117304,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "hiqbind": 0
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "hiqbind": 21450,
+   "pdbbind": 18717,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "3": {
+  "name": "baseline+gator_filtered_30",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs",
+   "gator_filtered_30"
+  ],
+  "n": 109843,
+  "n_before_graph_filter": 110340,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "gatoraffinity": 7
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "pdbbind": 18717,
+   "gatoraffinity": 14479,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "4": {
+  "name": "baseline+gator_filtered_60",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs",
+   "gator_filtered_60"
+  ],
+  "n": 124326,
+  "n_before_graph_filter": 124826,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "gatoraffinity": 10
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "gatoraffinity": 28962,
+   "pdbbind": 18717,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "5": {
+  "name": "baseline+gator_filtered_100",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs",
+   "gator_filtered_100"
+  ],
+  "n": 143638,
+  "n_before_graph_filter": 144140,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "gatoraffinity": 12
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "gatoraffinity": 48274,
+   "pdbbind": 18717,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "6": {
+  "name": "baseline+gator_unfiltered_30",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs",
+   "gator_unfiltered_30"
+  ],
+  "n": 111190,
+  "n_before_graph_filter": 111686,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "gatoraffinity": 6
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "pdbbind": 18717,
+   "gatoraffinity": 15826,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "7": {
+  "name": "baseline+gator_unfiltered_60",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs",
+   "gator_unfiltered_60"
+  ],
+  "n": 127017,
+  "n_before_graph_filter": 127518,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "gatoraffinity": 11
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "gatoraffinity": 31653,
+   "pdbbind": 18717,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "8": {
+  "name": "baseline+gator_unfiltered_100",
+  "parts": [
+   "pdbbind",
+   "bindingnet",
+   "bindingdb_dcs",
+   "gator_unfiltered_100"
+  ],
+  "n": 148125,
+  "n_before_graph_filter": 148627,
+  "dropped_no_graph": {
+   "pdbbind": 401,
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "gatoraffinity": 12
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "gatoraffinity": 52761,
+   "pdbbind": 18717,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "9": {
+  "name": "bindingnet+dcs+hiqbind",
+  "parts": [
+   "bindingnet",
+   "bindingdb_dcs",
+   "hiqbind"
+  ],
+  "n": 98097,
+  "n_before_graph_filter": 98186,
+  "dropped_no_graph": {
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "hiqbind": 0
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "hiqbind": 21450,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "10": {
+  "name": "bindingnet+dcs+hiqbind+gator_best",
+  "parts": [
+   "bindingnet",
+   "bindingdb_dcs",
+   "hiqbind",
+   "gator_unfiltered_100"
+  ],
+  "n": 150858,
+  "n_before_graph_filter": 150959,
+  "dropped_no_graph": {
+   "bindingnet": 89,
+   "bindingdb_dcs": 0,
+   "hiqbind": 0,
+   "gatoraffinity": 12
+  },
+  "by_source": {
+   "bindingnet": 67900,
+   "gatoraffinity": 52761,
+   "hiqbind": 21450,
+   "bindingdb_dcs": 8747
+  }
+ },
+ "11": {
+  "name": "pdbbind_only",
+  "parts": [
+   "pdbbind"
+  ],
+  "n": 18717,
+  "n_before_graph_filter": 19118,
+  "dropped_no_graph": {
+   "pdbbind": 401
+  },
+  "by_source": {
+   "pdbbind": 18717
+  }
+ }
+}

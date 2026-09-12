@@ -1,0 +1,34 @@
+{
+ "config": 5,
+ "seed": 45,
+ "best_avg8_val_pcc": 0.8579003065824509,
+ "val_pcc_at_best": 0.8590590357780457,
+ "best_epoch": 223,
+ "epochs_run": 243,
+ "n_train": 129274,
+ "n_val": 14364,
+ "y_scaler": [
+  7.019448937154189,
+  1.547929654534526
+ ],
+ "hyper": {
+  "lr": 0.00012291937615434127,
+  "batch": 128,
+  "weight_decay": 0,
+  "max_epochs": 250,
+  "avg_window": 8,
+  "early_patience": 20,
+  "source": "AEV-PLIG/training.py defaults"
+ },
+ "minutes": 336.24,
+ "preds": {
+  "ood295": {
+   "n": 295,
+   "nan": 0
+  },
+  "fep42": {
+   "n": 1087,
+   "nan": 0
+  }
+ }
+}
