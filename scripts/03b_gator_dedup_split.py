@@ -1,52 +1,79 @@
 #!/usr/bin/env python
 """
-阶段 3b：GatorAffinity 跨库去重 + 评测集分离 + 规模采样（PLAN §3.3.1 / §3.4.2）。
+Stage 3b: GatorAffinity cross-database deduplication + evaluation-set
+separation + scale sampling.
 
-四件事，顺序执行：
+Four things, executed in order:
 
-  (1) 安全网：Gator 索引自带 `PDB ID(s) for Ligand-Target Complex` 字段，
-      虽然 PLAN 说 Gator「无真实 PDB ID」，但该字段非空的行仍按 §3.4.2 的
-      PDB ID 键剔除（330 个泄漏 ID）。免费的额外保险，不与后续判据冲突。
+  (1) Safety net: the Gator index ships its own
+      `PDB ID(s) for Ligand-Target Complex` field. The initial design
+      specified that Gator has "no real PDB IDs", but rows where that
+      field is non-empty are still removed via the PDB ID leakage key
+      (330 leakage IDs). Free extra insurance, and it does not conflict
+      with the criteria that follow.
 
-  (2) 评测集分离（PLAN §3.3.1 末条 / §3.4.2 末段）：
-      靶点序列一致性（MMseqs2）+ 配体 ECFP4 Tanimoto，对 OOD 295 与 FEP 42 系列。
-      ★ 判据组合方式见下方「口径说明」。
+  (2) Evaluation-set separation: target sequence identity (MMseqs2) +
+      ligand ECFP4 Tanimoto, against the OOD 295 and FEP 42 series.
+      * How the two criteria are combined: see "Criterion note" below.
 
-  (3) 跨库去重（PLAN §3.3.1）：与 PDBbind、HiQBind（去重后）比 CleanSplit 三重判据
-      —— Tanimoto > 0.9 且 |ΔpK| <= 1.0 且 TM-score > 0.8，三者同时满足才判重复，
-      只剔 Gator 侧。
+  (3) Cross-database deduplication: against PDBbind and HiQBind (after
+      deduplication) using the CleanSplit triple criterion --
+      Tanimoto > 0.9 and |dpK| <= 1.0 and TM-score > 0.8; a pair counts
+      as duplicate only when all three hold at once, and only the Gator
+      side is dropped.
 
-  (4) 版本与采样（PLAN §3.3.2 / §4.1）：
-      未筛选版 = 去重后全量；筛选版 = 未筛选版 ∩ (Boltz-1 confidence >= 0.7)。
-      各自按 seed 42 打乱后取前 30% / 60% / 100%，**嵌套**（30% ⊂ 60% ⊂ 100%），
-      这样 Scaling Law 的三个点是同一条数据增长曲线上的点，而非三份独立样本。
+  (4) Versions and sampling: unfiltered version = everything left after
+      deduplication; filtered version = unfiltered version intersected
+      with (Boltz-1 confidence >= 0.7). Each is shuffled with seed 42
+      and the first 30% / 60% / 100% are taken, **nested**
+      (30% within 60% within 100%), so the three Scaling Law points sit
+      on a single data-growth curve rather than being three independent
+      samples.
 
-────────────────────────── 口径说明（评测集分离） ──────────────────────────
-PLAN 原文：「采用靶点序列相似度（< 30%）和配体化学相似度（Tanimoto < 0.9）过滤，
-确保与 OOD 测试集和 FEP Benchmark 无重叠」。字面有两种读法：
+--------------- Criterion note (evaluation-set separation) ------------
+The original wording was: "filter by target sequence similarity
+(< 30%) and ligand chemical similarity (Tanimoto < 0.9) to ensure no
+overlap with the OOD test set and the FEP Benchmark". Literally, that
+allows two readings:
 
-  读法 A（OR 剔除）：只要序列一致性 >= 30% **或** Tanimoto >= 0.9 就剔除。
-  读法 B（AND 剔除）：序列一致性 >= 30% **且** Tanimoto >= 0.9 才剔除。
+  Reading A (OR removal): remove as soon as sequence identity >= 30%
+    **or** Tanimoto >= 0.9.
+  Reading B (AND removal): remove only when sequence identity >= 30%
+    **and** Tanimoto >= 0.9.
 
-本脚本采用**读法 B**，理由：
-  · 该条款的目的写得很清楚 —— 「确保无重叠」，即找出「同一个复合物」在 Gator 中的
-    化身。同一复合物 = 同一靶点 **且** 同一配体，这与 PLAN 全篇（§3.2、§3.3.1）
-    「结构 ∧ 配体 ∧ 标签 三者同时满足」的合取逻辑一致。
-  · 其余数据源（PDBbind/BindingNet/DCS/HiQBind）用的是 PDB ID **精确**匹配，
-    只剔除完全相同的复合物、不剔同源物。读法 B（同源靶点 ∧ 近乎相同配体）已经
-    **严于** PDB ID 精确匹配；读法 A 则会把「任何与测试靶点 30% 同源的蛋白」全部
-    清出 Gator —— 30% 是同源性下限阈值，激酶类几乎全域互相 >30%，而 FEP 42 系列
-    含 CDK2/TYK2/JNK1/p38 等多个激酶，读法 A 会把 Gator 的激酶数据成片清空，
-    却对 baseline 的同类数据一行不动。那会让「Gator 有无增益」这个待检验的问题
-    在起跑线上就被系统性压低，实验不公平。
-  · 两种读法的命中数本脚本**都会计算并写入报告**，口径可随时切换、结论可复核。
-─────────────────────────────────────────────────────────────────────────
+This script uses **Reading B**, because:
+  - The purpose of the clause is stated plainly -- "ensure no overlap",
+    i.e. find the incarnations inside Gator of "the same complex". The
+    same complex = the same target **and** the same ligand, which is
+    consistent with the conjunctive logic used throughout the initial
+    design ("structure and ligand and label must all hold at once").
+  - The other data sources (PDBbind/BindingNet/DCS/HiQBind) use
+    **exact** PDB ID matching, which removes only strictly identical
+    complexes and never homologues. Reading B (homologous target and
+    near-identical ligand) is already **stricter** than exact PDB ID
+    matching; Reading A would instead sweep out of Gator "every protein
+    30% homologous to a test target" -- 30% is the lower bound of the
+    homology threshold, kinases are almost universally >30% identical
+    to one another, and the FEP 42 series contains several kinases
+    (CDK2/TYK2/JNK1/p38), so Reading A would wipe out Gator's kinase
+    data wholesale while not touching a single row of the equivalent
+    baseline data. That would systematically handicap the very question
+    under test ("does Gator add anything?") before the race starts,
+    making the experiment unfair.
+  - The hit counts of **both** readings are computed and written into
+    the report by this script, so the criterion can be switched and the
+    conclusion re-checked at any time.
+-----------------------------------------------------------------------
 
-TM-align 预筛（诚实记录）：第 (3) 步在配体+pK 判据存活后仍可能有海量结构对。
-TM-score > 0.8 实质要求同一折叠，故先用 MMseqs2 以**宽松**参数
-（--min-seq-id 0.2 -c 0.3 -e 10 -s 7.5）预筛，只对有序列命中的对跑 TM-align。
-被预筛剔掉的对会**随机抽样 400 对实跑 TM-align 做对照**，若其中出现 TM > 0.8
-则说明预筛过紧，报告中会明确给出该数字，不做静默截断。
+TM-align prescreen (recorded honestly): after the ligand + pK criteria,
+step (3) may still leave a huge number of structure pairs. TM-score >
+0.8 effectively demands the same fold, so MMseqs2 is run first with
+**loose** parameters (--min-seq-id 0.2 -c 0.3 -e 10 -s 7.5) as a
+prescreen, and TM-align is run only on pairs with a sequence hit. Pairs
+dropped by the prescreen are **audited by actually running TM-align on
+400 randomly sampled pairs**; if any of them shows TM > 0.8 the
+prescreen was too tight, and that number is stated explicitly in the
+report -- nothing is truncated silently.
 """
 import os, sys, json, math, re, random, subprocess, shutil
 from collections import defaultdict
@@ -73,7 +100,8 @@ CONF_THR = 0.7
 SEED = 42
 FRACTIONS = [0.30, 0.60, 1.00]
 
-# ΔG = -RT·ln10·pK  →  pK = -ΔG / (RT·ln10)；R=1.987204e-3 kcal/(K·mol), T=297K
+# dG = -RT*ln10*pK  ->  pK = -dG / (RT*ln10); R=1.987204e-3 kcal/(K*mol),
+# T=297K
 RT_LN10 = 1.987204259e-3 * 297.0 * math.log(10.0)   # ≈ 1.35867 kcal/mol
 
 log = lambda *a: print(*a, flush=True)
@@ -85,10 +113,11 @@ AA3 = {'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C', 'GLN': 'Q',
        'TYR': 'Y', 'VAL': 'V', 'MSE': 'M', 'SEC': 'U', 'PYL': 'O'}
 
 
-# ──────────────────────────── 基础工具 ────────────────────────────
+# ───────────────────────── Basic utilities ─────────────────────────
 
 def longest_chain_seq(p):
-    """按 CA 原子解析 PDB，返回最长链的单字母序列（与 02b 完全一致的口径）。"""
+    """Parse the PDB by CA atoms and return the one-letter sequence of
+    the longest chain (exactly the same convention as 02b)."""
     try:
         chains, seen = {}, set()
         with open(p, 'r', errors='ignore') as f:
@@ -150,7 +179,8 @@ def write_fasta(path, pairs):
 
 
 def mmseqs_hits(qfa, tfa, tag, min_id, cov, evalue, sens=7.5):
-    """返回 {(query_id, target_id)} 中一致性 >= min_id 的命中集合。"""
+    """Return the set of {(query_id, target_id)} hits whose identity is
+    >= min_id."""
     d = f'{TMP}/{tag}'
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d, exist_ok=True)
@@ -164,24 +194,25 @@ def mmseqs_hits(qfa, tfa, tag, min_id, cov, evalue, sens=7.5):
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         log(r.stdout[-2000:]); log(r.stderr[-2000:])
-        raise RuntimeError(f'mmseqs {tag} 失败')
+        raise RuntimeError(f'mmseqs {tag} failed')
     hits = set()
     with open(res) as f:
         for ln in f:
             q, t, fi = ln.rstrip('\n').split('\t')[:3]
             if float(fi) >= min_id:
                 hits.add((q, t))
-    log(f'  [mmseqs:{tag}] 命中对 {len(hits)}')
+    log(f'  [mmseqs:{tag}] hit pairs {len(hits)}')
     return hits
 
 
-# ──────────────── Tanimoto 匹配（popcount 剪枝，并行） ────────────────
+# ───── Tanimoto matching (popcount pruning, parallel) ─────
 
 _QF = _RF = _BYPC = _PCS = None
 
 
 def _match_block(rng):
-    """一批 query 指纹 → [(qi, ri, sim)]，仅保留 sim > T_TANI。"""
+    """One block of query fingerprints -> [(qi, ri, sim)], keeping only
+    sim > T_TANI."""
     out = []
     for j in rng:
         f = _QF[j]
@@ -198,7 +229,8 @@ def _match_block(rng):
 
 
 def tanimoto_pairs(qfps, rfps, label):
-    """返回 [(qi, ri, sim)]；对 T=c/(a+b-c)>t 用 min(a,b) > t·max(a,b) 剪枝。"""
+    """Return [(qi, ri, sim)]; for T=c/(a+b-c)>t, prune with
+    min(a,b) > t*max(a,b)."""
     global _QF, _RF, _BYPC, _PCS
     bypc = defaultdict(list)
     for i, f in enumerate(rfps):
@@ -206,16 +238,18 @@ def tanimoto_pairs(qfps, rfps, label):
             bypc[f.GetNumOnBits()].append(i)
     _QF, _RF, _BYPC, _PCS = qfps, rfps, bypc, sorted(bypc)
     blocks = [range(k, min(k + 200, len(qfps))) for k in range(0, len(qfps), 200)]
-    log(f'  [Tanimoto:{label}] {len(qfps)} × {len(rfps)} 唯一配体，{len(blocks)} 块 …')
+    log(f'  [Tanimoto:{label}] {len(qfps)} × {len(rfps)} unique ligands,'
+        f' {len(blocks)} blocks ...')
     pairs = [x for b in pmap(_match_block, blocks, 1) for x in b]
-    log(f'  [Tanimoto:{label}] > {T_TANI} 的配体对 {len(pairs)}')
+    log(f'  [Tanimoto:{label}] ligand pairs > {T_TANI}: {len(pairs)}')
     return pairs
 
 
-# ──────────────────── 评测集清单（供本脚本与阶段 6 复用） ────────────────────
+# ───── Evaluation-set manifests (reused by this script and stage 6) ─────
 
 def smiles_from_files(sdf, mol2):
-    """先 SDF（sanitize），失败退 mol2；与 02b/02b2 的口径一致。"""
+    """Try SDF first (with sanitize), fall back to mol2; same convention
+    as 02b/02b2."""
     try:
         for m in Chem.SDMolSupplier(sdf, sanitize=True):
             if m is not None:
@@ -234,7 +268,7 @@ def smiles_from_files(sdf, mol2):
 def build_ood295():
     d = pd.read_csv(f'{TS}/index_oodtest.csv')
     d = d[d.split == 'test'].copy()
-    assert len(d) == 295, f'OOD test 行数异常 {len(d)}'
+    assert len(d) == 295, f'unexpected OOD test row count {len(d)}'
     rows = []
     for p, pk in zip(d.PDB_code, d['-logKd/Ki']):
         prot = f'{DS}/structure/pdbbind/refined-set/{p}/{p}_protein.pdb'
@@ -244,7 +278,8 @@ def build_ood295():
         rows.append((p, float(pk), smi, src, longest_chain_seq(prot), prot, sdf))
     o = pd.DataFrame(rows, columns=['pdb_id', 'pK', 'smiles', 'smiles_src',
                                     'seq', 'protein_pdb', 'ligand_sdf'])
-    log(f'[OOD] {len(o)} 条；SMILES 失败 {o.smiles.isna().sum()}，序列为空 {(o.seq == "").sum()}')
+    log(f'[OOD] {len(o)} records; SMILES failures {o.smiles.isna().sum()},'
+        f' empty sequences {(o.seq == "").sum()}')
     o.to_csv(f'{META}/testset_ood295.csv', index=False)
     return o
 
@@ -252,13 +287,14 @@ def build_ood295():
 def build_fep42():
     m = pd.read_csv(f'{FEP}/benchmark_metadata.csv')
     s = m[m['Number of nodes'] >= 10].copy()
-    assert len(s) == 42, f'FEP n>=10 系列数异常 {len(s)}'
+    assert len(s) == 42, f'unexpected FEP n>=10 series count {len(s)}'
     rows, seqs = [], []
     for _, g in s.iterrows():
         ab, nm = g['Group abbreviation'], g['Input file naming scheme']
         base = f'{FEP}/structure_inputs/{ab}'
         prot, lig = f'{base}/{nm}_protein.pdb', f'{base}/{nm}_ligands.sdf'
-        assert os.path.exists(prot) and os.path.exists(lig), f'缺文件 {ab}/{nm}'
+        assert os.path.exists(prot) and os.path.exists(lig), \
+            f'missing file {ab}/{nm}'
         seqs.append((f'FEP|{nm}', longest_chain_seq(prot)))
         n = 0
         for k, mol in enumerate(Chem.SDMolSupplier(lig, sanitize=True)):
@@ -274,84 +310,96 @@ def build_fep42():
                          Chem.MolToSmiles(mol), prot, lig))
             n += 1
         if n != int(g['Number of nodes']):
-            # merck/syk_4puz_fullmap 含 2 个名为 intermediate* 的节点：它们是扰动图上的
-            # 合成中间体，SDF 里没有 r_exp_dg，本就无实验标签、不可评测。
-            # 故可评测配体数 1087 < 元数据节点数 1089，如实记录，不做插补。
-            log(f'  ! {nm}: 有实验 ΔG 的配体 {n} 个，元数据节点数 {g["Number of nodes"]}')
+            # merck/syk_4puz_fullmap holds 2 nodes named intermediate*:
+            # they are synthetic intermediates on the perturbation graph,
+            # they carry no r_exp_dg in the SDF, so they have no
+            # experimental label and cannot be evaluated at all.
+            # Hence 1087 evaluable ligands < 1089 metadata nodes; this is
+            # recorded faithfully rather than imputed.
+            log(f'  ! {nm}: {n} ligands with an experimental dG, '
+                f'metadata nodes {g["Number of nodes"]}')
     f = pd.DataFrame(rows, columns=['series', 'group_abbrev', 'group_name', 'ref_pdb',
                                     'n_nodes', 'lig_idx', 'lig_name', 'dG_exp', 'pK',
                                     'smiles', 'protein_pdb', 'ligand_sdf'])
-    log(f'[FEP] {f.series.nunique()} 系列 / {len(f)} 配体（元数据合计 1089）；'
+    log(f'[FEP] {f.series.nunique()} series / {len(f)} ligands '
+        f'(metadata total 1089); '
         f'pK {f.pK.min():.2f}~{f.pK.max():.2f}')
     f.to_csv(f'{META}/testset_fep42.csv', index=False)
     write_fasta(f'{META}/pool_fep42.fasta', seqs)
     return f, seqs
 
 
-# ──────────────────────────────── 主流程 ────────────────────────────────
+# ───────────────────────── Main pipeline ─────────────────────────
 
 def main():
     os.makedirs(TMP, exist_ok=True)
     rep = {'thresholds': {'tanimoto': T_TANI, 'abs_dpK': T_DPK, 'tm_score': T_TM,
                           'seq_identity': T_SEQID, 'conf': CONF_THR,
-                          'testset_rule': 'AND(seqid>=0.30, tanimoto>=0.9) 才剔除；见脚本文档'},
+                          'testset_rule': 'remove only when AND(seqid>='
+                                          '0.30, tanimoto>=0.9); see the '
+                                          'module docstring'},
            'seed': SEED}
-    log(f'并行 {NPROC}；阈值 Tanimoto>{T_TANI} |dpK|<={T_DPK} TM>{T_TM} seqid>={T_SEQID}')
+    log(f'parallel {NPROC}; thresholds Tanimoto>{T_TANI} '
+        f'|dpK|<={T_DPK} TM>{T_TM} seqid>={T_SEQID}')
 
     g = pd.read_csv(f'{OUT}/gator_clean.csv')
-    log(f'\n[Gator] 输入 {len(g)} 条（03a 产物）')
+    log(f'\n[Gator] input {len(g)} records (output of 03a)')
     rep['gator_in'] = int(len(g))
 
-    # ============ (1) PDB ID 安全网 ============
+    # ============ (1) PDB ID safety net ============
     leak = set(json.load(open(f'{META}/leakage_ids.json'))['excluded_pdb_ids'])
     col = g['PDB ID(s) for Ligand-Target Complex'].astype(str)
     hit_pdb = np.array([
         any(x.strip().lower()[:4] in leak for x in c.replace(';', ',').split(',') if x.strip())
         if c and c.lower() != 'nan' else False for c in col])
-    log(f'(1) PDB ID 安全网：字段非空 {int((col.str.lower() != "nan").sum())}，'
-        f'命中泄漏 ID {int(hit_pdb.sum())} 条')
+    log(f'(1) PDB ID safety net: field non-empty '
+        f'{int((col.str.lower() != "nan").sum())}, '
+        f'matching a leakage ID {int(hit_pdb.sum())}')
     rep['step1_pdbid_leak'] = int(hit_pdb.sum())
     g = g[~hit_pdb].copy().reset_index(drop=True)
 
-    # ============ (2) 评测集分离 ============
-    log('\n(2) 评测集分离（OOD 295 + FEP 42）')
+    # ============ (2) Evaluation-set separation ============
+    log('\n(2) Evaluation-set separation (OOD 295 + FEP 42)')
     ood = build_ood295()
     fep, fep_seqs = build_fep42()
 
-    # 2a 序列一致性：Gator vs 测试靶点
+    # 2a Sequence identity: Gator vs test targets
     tfa = f'{TMP}/testset_targets.fasta'
     n = write_fasta(tfa, [(f'OOD|{p}', s) for p, s in zip(ood.pdb_id, ood.seq)] + fep_seqs)
-    log(f'  测试靶点序列 {n} 条')
+    log(f'  test target sequences {n}')
     qfa = f'{TMP}/gator_q.fasta'
     write_fasta(qfa, [(f'GA|{i}', s) for i, s in zip(g.unique_id, g.seq.fillna(''))])
     hits = mmseqs_hits(qfa, tfa, 'test', T_SEQID, 0.5, 1e-3)
     seq_hit_ids = {q.split('|', 1)[1] for q, _ in hits}
     seq_hit = g.unique_id.isin(seq_hit_ids).values
-    log(f'  序列一致性 >= {T_SEQID} 的 Gator 样本 {int(seq_hit.sum())}')
+    log(f'  Gator samples with sequence identity >= {T_SEQID}: '
+        f'{int(seq_hit.sum())}')
 
-    # 2b 配体 Tanimoto：Gator vs 测试配体
+    # 2b Ligand Tanimoto: Gator vs test ligands
     gu = sorted(set(g.smiles_canon.dropna()))
     tl = sorted({x for x in list(ood.smiles.dropna()) + list(fep.smiles.dropna()) if x})
     tl = [c for c in pmap(canon, tl) if c]
-    log(f'  唯一配体：Gator {len(gu)}，测试集 {len(set(tl))}')
+    log(f'  unique ligands: Gator {len(gu)}, test set {len(set(tl))}')
     gfp, tfp = pmap(fp_of, gu), pmap(fp_of, sorted(set(tl)))
     lp = tanimoto_pairs(gfp, tfp, 'gator-vs-test')
     lig_hit_smi = {gu[j] for j, _, _ in lp}
     lig_hit = g.smiles_canon.isin(lig_hit_smi).values
-    log(f'  Tanimoto > {T_TANI} 的 Gator 样本 {int(lig_hit.sum())}')
+    log(f'  Gator samples with Tanimoto > {T_TANI}: {int(lig_hit.sum())}')
 
     n_and, n_or = int((seq_hit & lig_hit).sum()), int((seq_hit | lig_hit).sum())
-    log(f'  ★ 读法 B（AND，本脚本采用）剔除 {n_and} 条；'
-        f'读法 A（OR）本会剔除 {n_or} 条 —— 两者均记入报告')
+    log(f'  * Reading B (AND, used by this script) removes {n_and}; '
+        f'Reading A (OR) would have removed {n_or} -- both go into the '
+        f'report')
     rep['step2'] = {'seq_hit': int(seq_hit.sum()), 'lig_hit': int(lig_hit.sum()),
                     'removed_AND': n_and, 'would_remove_OR': n_or}
     pd.DataFrame({'unique_id': g.unique_id, 'seq_hit': seq_hit,
                   'lig_hit': lig_hit}).to_csv(f'{OUT}/gator_testset_flags.csv', index=False)
     g = g[~(seq_hit & lig_hit)].copy().reset_index(drop=True)
-    log(f'  → 剩余 {len(g)}')
+    log(f'  -> remaining {len(g)}')
 
-    # ============ (3) 跨库三重去重（vs PDBbind + HiQBind） ============
-    log('\n(3) 跨库去重：vs PDBbind + HiQBind（CleanSplit 三重判据）')
+    # ====== (3) Cross-DB triple deduplication (vs PDBbind + HiQBind) ======
+    log('\n(3) Cross-database deduplication: vs PDBbind + HiQBind '
+        '(CleanSplit triple criterion)')
     pb = pd.read_csv(f'{ROOT}/experiments/01_baseline_index/pdbbind_clean.csv')
     ps = pd.read_csv(f'{META}/pdbbind_smiles_seq.csv')
     pb = pb.merge(ps[['pdb_id', 'smiles', 'seq']], on='pdb_id', how='left')
@@ -372,8 +420,9 @@ def main():
         pd.DataFrame({'rid': 'HQ|' + hq.unique_id.astype(str), 'csmi': hq.csmi,
                       'pK': hq.pK, 'prot': hq.protein_pdb, 'seq': hq.seq}),
     ], ignore_index=True)
-    log(f'  参考池 {len(ref)} 条 = PDBbind {len(pb)} + HiQBind {len(hq)}'
-        f'（SMILES 缺失 {ref.csmi.isna().sum()}）')
+    log(f'  reference pool {len(ref)} = PDBbind {len(pb)} + '
+        f'HiQBind {len(hq)} '
+        f'(SMILES missing {ref.csmi.isna().sum()})')
 
     ru = sorted(set(ref.csmi.dropna()))
     gu2 = sorted(set(g.smiles_canon.dropna()))
@@ -392,13 +441,14 @@ def main():
     pairs = [(x, y, s) for j, i, s in lp2
              for x in g_by[gu2[j]] for y in r_by[ru[i]]
              if abs(gpk[x] - rpk[y]) <= T_DPK]
-    log(f'  叠加 |dpK| <= {T_DPK} 后样本对 {len(pairs)}')
+    log(f'  sample pairs after adding |dpK| <= {T_DPK}: {len(pairs)}')
 
     gprot, rprot = g.protein_pdb.values, ref.prot.values
     uniq = sorted({(gprot[x], rprot[y]) for x, y, _ in pairs})
-    log(f'  唯一结构对 {len(uniq)}')
+    log(f'  unique structure pairs {len(uniq)}')
 
-    # 宽松序列预筛（只为省 TM-align 算力，事后抽样对照）
+    # Loose sequence prescreen (purely to save TM-align compute; audited
+    # afterwards on a random sample)
     gid_of = {p: i for p, i in zip(gprot, g.unique_id)}
     rid_of = {p: i for p, i in zip(rprot, ref.rid)}
     need_g = {gid_of[a] for a, _ in uniq}
@@ -408,31 +458,38 @@ def main():
                      if i in need_g])
     write_fasta(tf, [(i, s) for i, s in zip(ref.rid, ref.seq.fillna(''))
                      if i in need_r and isinstance(s, str)])
-    # 实测唯一结构对只有几千对，TM-align 几分钟就跑完 —— 预筛纯属多余，
-    # 只在规模真的爆炸（> 20 万对）时才启用，以免引入不必要的近似。
+    # In practice there are only a few thousand unique structure pairs
+    # and TM-align finishes in minutes -- the prescreen is pure overhead,
+    # so it is enabled only when the scale truly explodes (> 200k pairs),
+    # to avoid introducing an unnecessary approximation.
     PRE_LIMIT = 200_000
     if len(uniq) > PRE_LIMIT:
         pre = mmseqs_hits(qf, tf, 'pre', 0.2, 0.3, 10.0)
         pre = {(q.split('|', 1)[1], t) for q, t in pre}
         keep_pair = [(a, b) for a, b in uniq if (gid_of[a], rid_of[b]) in pre]
         drop_pair = [(a, b) for a, b in uniq if (gid_of[a], rid_of[b]) not in pre]
-        log(f'  预筛保留 {len(keep_pair)} 对，暂缓 {len(drop_pair)} 对')
+        log(f'  prescreen kept {len(keep_pair)} pairs, '
+            f'deferred {len(drop_pair)} pairs')
     else:
         keep_pair, drop_pair = list(uniq), []
-        log(f'  结构对仅 {len(uniq)} 对，跳过预筛，全部实跑 TM-align')
+        log(f'  only {len(uniq)} structure pairs, skipping the '
+            f'prescreen, running TM-align on all of them')
 
-    log(f'  [TM-align] 跑 {len(keep_pair)} 对 …')
+    log(f'  [TM-align] running {len(keep_pair)} pairs ...')
     tm = dict(zip(keep_pair, pmap(tmscore, keep_pair, 4)))
     nfail = sum(1 for v in tm.values() if v < 0)
-    log(f'    失败 {nfail}；TM > {T_TM} 的对 {sum(1 for v in tm.values() if v > T_TM)}')
+    log(f'    failures {nfail}; pairs with TM > {T_TM}: '
+        f'{sum(1 for v in tm.values() if v > T_TM)}')
 
-    # 预筛对照：随机抽 400 对被暂缓的实跑，看是否漏判
+    # Prescreen audit: actually run 400 randomly sampled deferred pairs
+    # to see whether anything was missed
     random.seed(SEED)
     audit = random.sample(drop_pair, min(400, len(drop_pair)))
     av = pmap(tmscore, audit, 4) if audit else []
     n_audit_bad = sum(1 for v in av if v > T_TM)
-    log(f'  [预筛对照] 抽检 {len(audit)} 对，其中 TM > {T_TM} 的有 {n_audit_bad} 个'
-        f'（0 表示预筛未漏判）')
+    log(f'  [prescreen audit] sampled {len(audit)} pairs, of which '
+        f'TM > {T_TM} holds for {n_audit_bad} '
+        f'(0 means the prescreen missed nothing)')
     for a, v in zip(audit, av):
         tm[a] = v
 
@@ -446,7 +503,8 @@ def main():
     pd.DataFrame(rec, columns=['gator_unique_id', 'ref_id', 'tanimoto',
                                'abs_dpK', 'tm_score']).to_csv(
         f'{OUT}/gator_dup_pairs.csv', index=False)
-    log(f'  三重判据命中 Gator {int(dup.sum())} 条 → 保留 {int((~dup).sum())}')
+    log(f'  triple criterion hits {int(dup.sum())} Gator records -> '
+        f'keeping {int((~dup).sum())}')
     rep['step3'] = {'ref_pool': int(len(ref)), 'lig_pairs': len(lp2),
                     'pairs_after_pK': len(pairs), 'uniq_struct_pairs': len(uniq),
                     'prescreen_kept': len(keep_pair), 'prescreen_deferred': len(drop_pair),
@@ -454,8 +512,8 @@ def main():
                     'tm_fail': int(nfail), 'duplicates_removed': int(dup.sum())}
     g = g[~dup].copy().reset_index(drop=True)
 
-    # ============ (4) 版本 + 嵌套采样 ============
-    log('\n(4) 版本与规模采样')
+    # ============ (4) Versions + nested sampling ============
+    log('\n(4) Versions and scale sampling')
     g['pass_conf'] = pd.to_numeric(g.conf, errors='coerce') >= CONF_THR
     ver = {'unfiltered': g.index.values,
            'filtered': g.index[g.pass_conf].values}
@@ -472,17 +530,20 @@ def main():
 
     g.to_csv(f'{OUT}/gator_dedup.csv', index=False)
 
-    log(f'\n[Gator 最终] {len(g)} 条（未筛选版）；筛选版 {int(g.pass_conf.sum())}')
-    log(f'  唯一配体 {g.smiles_canon.nunique()}；唯一靶点 {g.target_key.nunique()}；'
-        f'唯一骨架 {g.scaffold.nunique()}')
-    log(f'  pK {g.pK.min():.2f} ~ {g.pK.max():.2f}，均值 {g.pK.mean():.3f}')
+    log(f'\n[Gator final] {len(g)} records (unfiltered version); '
+        f'filtered version {int(g.pass_conf.sum())}')
+    log(f'  unique ligands {g.smiles_canon.nunique()}; '
+        f'unique targets {g.target_key.nunique()}; '
+        f'unique Bemis-Murcko scaffolds {g.scaffold.nunique()}')
+    log(f'  pK {g.pK.min():.2f} ~ {g.pK.max():.2f}, '
+        f'mean {g.pK.mean():.3f}')
     rep.update({'gator_final_unfiltered': int(len(g)),
                 'gator_final_filtered': int(g.pass_conf.sum()),
                 'unique_ligand': int(g.smiles_canon.nunique()),
                 'unique_target': int(g.target_key.nunique()),
                 'unique_scaffold': int(g.scaffold.nunique())})
     json.dump(rep, open(f'{OUT}/report_03b.json', 'w'), indent=1, ensure_ascii=False)
-    log(f'\n产物 → {OUT}/{{gator_dedup.csv, gator_dup_pairs.csv, '
+    log(f'\noutputs -> {OUT}/{{gator_dedup.csv, gator_dup_pairs.csv, '
         f'gator_testset_flags.csv, report_03b.json}}'
         f'\n       {META}/{{testset_ood295.csv, testset_fep42.csv, pool_fep42.fasta}}')
     return 0
