@@ -1,25 +1,35 @@
 #!/usr/bin/env python
 """
-阶段 6：评估与统计推断（PLAN §6.2 / §6.3 / §6.4 / §6.5）。
+Stage 6: evaluation and statistical inference.
 
-输入：06_train 各 (配置, 种子) 目录下的 pred_ood295.npy / pred_fep42.npy
-     （训练脚本已用各自最优检查点推理并逆标准化回 pK）
+Inputs: pred_ood295.npy / pred_fep42.npy under each (config, seed) directory
+        of 06_train (the training script has already run inference with the
+        best checkpoint of each run and inverse-transformed outputs to pK).
 
-产出 experiments/07_eval/
-  results.json        全部指标与 CI 的结构化结果
-  table_main.csv      主表：每配置 FEP wmPCC/wmKτ + OOD PCC/τ_b/RMSE/MAE（含 95% BCa CI）
-  table_single.csv    单模型（逐种子）指标，用于展示集成收益
-  per_series/cfgXX.csv 每配置的 42 系列逐系列 r / τ / n
-  paired_diff.csv     各配置 vs 配置1 的配对差值 CI（PLAN §6.5：不用区间重叠判断显著性）
-  scaling.csv         Scaling Law log-linear 拟合（k, b, R²）
-  strat.csv           §6.4 序列相似度分层（探索性）
-  gator_best.json     配置 3-8 中 FEP wmPCC 最高者 → 配置 10 用哪份 Gator
-  report.md           人读摘要
+Outputs in experiments/07_eval/
+  results.json         structured results for all metrics and CIs
+  table_main.csv       main table: per-config FEP wmPCC/wmKτ + OOD
+                       PCC/τ_b/RMSE/MAE (with 95% BCa confidence intervals)
+  table_single.csv     single-model (per-seed) metrics, to show the
+                       ensembling gain
+  per_series/cfgXX.csv per-series r / τ / n over the 42 series, per config
+  paired_diff.csv      paired difference CIs of each config vs config 1
+                       (significance is judged from the paired difference,
+                       not from overlap of the individual intervals)
+  scaling.csv          scaling-law log-linear fit (k, b, R²)
+  strat.csv            sequence-similarity stratified analysis (exploratory)
+  gator_best.json      config with the highest FEP wmPCC among configs 3-8
+                       → which Gator variant config 10 uses
+  report.md            human-readable summary
 
-说明（如实记录在 report.md）：
- · §6.4 分层用「源级」靶点池计算最大序列一致性：Gator 的 30%/60% 规模子集是随机抽样，
-   靶点覆盖与 100% 版几乎一致，且 §6.4 本身定位为探索性分析，故不按子集细分。
- · BindingNet / BindingDB-DCS 无独立序列池，其靶点即 PDB 条目，用 PDBbind 序列池代表。
+Notes (also recorded in report.md):
+ · Stratification computes the maximum sequence identity against the
+   source-level target pool: the 30%/60% Gator size subsets are random
+   samples whose target coverage is almost identical to the 100% version,
+   and the stratified analysis is exploratory by design, so it is not
+   broken down per subset.
+ · BindingNet / BindingDB-DCS have no separate sequence pool; their targets
+   are PDB entries, so the PDBbind sequence pool is used as a proxy.
 """
 import os, sys, json, argparse, subprocess, shutil
 import numpy as np
@@ -38,15 +48,18 @@ OUT = f'{E}/07_eval'
 TMP = f'{ROOT}/tmp_07'
 log = lambda *a: print(*a, flush=True)
 
-SRC_OF_CONFIG_POOL = {          # 配置组成 → 用于分层的序列池
+SRC_OF_CONFIG_POOL = {          # config component → pool for stratification
     'pdbbind': 'pdbbind', 'bindingnet': 'pdbbind', 'bindingdb_dcs': 'pdbbind',
     'hiqbind': 'hiqbind', 'gatoraffinity': 'gator'}
 
 
-# ───────────────────────── 预测值收集与集成 ─────────────────────────
+# ─────────────── prediction collection and ensembling ───────────────
 
 def collect(cid, seeds):
-    """返回 {seed: {'ood295': arr, 'fep42': arr}}，只取 done.json 存在的种子。"""
+    """Return {seed: {'ood295': arr, 'fep42': arr}}.
+
+    Only seeds whose done.json exists are included.
+    """
     out = {}
     for s in seeds:
         d = f'{TRAIN}/cfg{cid:02d}/seed{s}'
@@ -55,19 +68,19 @@ def collect(cid, seeds):
         try:
             out[s] = {t: np.load(f'{d}/pred_{t}.npy') for t in ['ood295', 'fep42']}
         except FileNotFoundError:
-            log(f'  ! cfg{cid:02d} seed{s} 缺预测文件，跳过')
+            log(f'  ! cfg{cid:02d} seed{s} missing predictions, skipping')
     return out
 
 
 def ensemble(preds, key):
-    """简单算术平均（PLAN §5.3）；逐样本忽略 NaN。"""
+    """Simple arithmetic mean; NaNs are ignored per sample."""
     a = np.vstack([preds[s][key] for s in sorted(preds)])
     with np.errstate(invalid='ignore'):
         m = np.nanmean(a, axis=0)
     return m, a
 
 
-# ───────────────────────── §6.4 序列相似度分层 ─────────────────────────
+# ─────────────── sequence-similarity stratification ───────────────
 
 def write_fa(path, recs):
     with open(path, 'w') as f:
@@ -83,7 +96,10 @@ AA3 = {'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C', 'GLN': 'Q',
 
 
 def longest_chain_seq(pdb_path):
-    """与 02b_extract_smiles_seq.py 同口径：按 CA 原子解析各链，取最长链。"""
+    """Same convention as 02b_extract_smiles_seq.py.
+
+    Parse each chain from its CA atoms and return the longest chain.
+    """
     try:
         chains, seen = {}, set()
         with open(pdb_path, 'r', errors='ignore') as f:
@@ -105,10 +121,15 @@ def longest_chain_seq(pdb_path):
 
 
 def ood_seqs():
-    """OOD 295 的靶点序列。注意不能查 pdbbind_smiles_seq.csv —— 那张表是从
-    pdbbind_clean.csv 生成的，OOD 295 条已按 §3.4.2 剔除，查不到（会静默变空串，
-    导致分层的 OOD 部分整体缺失）。这里直接从 refined-set 的 PDB 结构解析，
-    并缓存到 00_meta/ood295_seq.fasta。"""
+    """Target sequences of OOD 295.
+
+    Do not look these up in pdbbind_smiles_seq.csv: that table is generated
+    from pdbbind_clean.csv, from which the 295 OOD entries have already been
+    removed, so the lookup fails (silently yielding empty strings and
+    dropping the entire OOD part of the stratification). Instead, parse the
+    refined-set PDB structures directly and cache the result in
+    00_meta/ood295_seq.fasta.
+    """
     cache = f'{META}/ood295_seq.fasta'
     ood = pd.read_csv(f'{META}/testset_ood295.csv')
     if os.path.exists(cache):
@@ -130,21 +151,24 @@ def ood_seqs():
         recs.append((f'ood|{str(p).lower()}', s))
     write_fa(cache, recs)
     n = sum(1 for _, s in recs if s)
-    log(f'  OOD 靶点序列 {n}/{len(recs)} 解析成功 → {cache}')
+    log(f'  OOD target sequences parsed {n}/{len(recs)} → {cache}')
     return recs
 
 
 def eval_maxid(force=False):
-    """每个评测靶点 vs 每个源靶点池的最大序列一致性 → 00_meta/eval_maxid.csv。"""
+    """Max sequence identity of each eval target vs each source target pool.
+
+    Written to 00_meta/eval_maxid.csv.
+    """
     cache = f'{META}/eval_maxid.csv'
     if os.path.exists(cache) and not force:
         return pd.read_csv(cache)
     if shutil.which('mmseqs') is None:
-        log('  ! 未找到 mmseqs，跳过分层')
+        log('  ! mmseqs not found, skipping stratification')
         return None
     os.makedirs(TMP, exist_ok=True)
 
-    # query = OOD 295 靶点序列 + FEP 42 系列靶点序列
+    # query = OOD 295 target sequences + FEP 42 series target sequences
     q = list(ood_seqs())
     fep_fa = f'{META}/pool_fep42.fasta'
     if os.path.exists(fep_fa):
@@ -153,8 +177,9 @@ def eval_maxid(force=False):
             if ln.startswith('>'):
                 if cur:
                     q.append((f'fep|{cur}', ''.join(buf)))
-                # header 形如 ">FEP|ptp1b"，只取 | 之后的系列名，
-                # 否则会拼成 fep|FEP|ptp1b，与评估侧的 fep|ptp1b 对不上
+                # Headers look like ">FEP|ptp1b"; keep only the series name
+                # after "|", otherwise the key becomes fep|FEP|ptp1b and no
+                # longer matches fep|ptp1b on the evaluation side.
                 cur, buf = ln[1:].strip().split()[0].split('|')[-1], []
             else:
                 buf.append(ln.strip())
@@ -162,26 +187,26 @@ def eval_maxid(force=False):
             q.append((f'fep|{cur}', ''.join(buf)))
     qf = f'{TMP}/query.fasta'
     write_fa(qf, q)
-    log(f'  分层 query {sum(1 for _, s in q if s)} 条'
-        f'（OOD {sum(1 for k, s in q if k.startswith("ood|") and s)} + '
-        f'FEP {sum(1 for k, s in q if k.startswith("fep|") and s)}）')
+    log(f'  stratification query: {sum(1 for _, s in q if s)} sequences'
+        f' (OOD {sum(1 for k, s in q if k.startswith("ood|") and s)} + '
+        f'FEP {sum(1 for k, s in q if k.startswith("fep|") and s)})')
 
     rows = []
     for src, fa in [('pdbbind', f'{META}/pool_pdbbind.fasta'),
                     ('hiqbind', f'{META}/pool_hiqbind.fasta'),
                     ('gator', f'{E}/03_gator/pool_gator.fasta')]:
         if not os.path.exists(fa):
-            log(f'  ! 缺 {fa}，跳过 {src}')
+            log(f'  ! missing {fa}, skipping {src}')
             continue
         o = f'{TMP}/hits_{src}.tsv'
         cmd = ['mmseqs', 'easy-search', qf, fa, o, f'{TMP}/t_{src}',
                '--min-seq-id', '0.0', '-c', '0.5', '--cov-mode', '0', '-e', '1e-3',
                '-s', '7.5', '--max-seqs', '4000', '--threads', '32',
                '--format-output', 'query,target,fident']
-        log(f'  [mmseqs] 评测靶点 vs {src} …')
+        log(f'  [mmseqs] eval targets vs {src} …')
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
-            log(f'  ! mmseqs 失败：{r.stderr[-400:]}')
+            log(f'  ! mmseqs failed: {r.stderr[-400:]}')
             continue
         h = pd.read_csv(o, sep='\t', names=['q', 't', 'fident'])
         g = h.groupby('q').fident.max().reset_index()
@@ -191,19 +216,24 @@ def eval_maxid(force=False):
         return None
     d = pd.concat(rows, ignore_index=True)
     d = d.pivot(index='q', columns='src', values='fident').reset_index()
-    # 对某个池没有任何命中，说明相似度低于 e-value/覆盖率门槛 —— 补 0 而不是丢弃。
-    # 若丢弃，这些 query 在下游 lay.get(i,'unknown') 里既不进 high 也不进 low，
-    # 等于白扔样本，而它们恰恰是「低相似度」层最该保留的部分。
+    # No hit at all against a pool means the similarity is below the
+    # e-value/coverage threshold, so fill with 0 instead of dropping. If
+    # dropped, these queries would land in neither high nor low in the
+    # downstream lay.get(i,'unknown'), wasting samples that are exactly the
+    # ones the low-similarity stratum most needs to keep.
     d = pd.DataFrame({'q': [k for k, s in q if s]}).merge(d, on='q', how='left')
     d[[c for c in d.columns if c != 'q']] = d[
         [c for c in d.columns if c != 'q']].fillna(0.0)
     d.to_csv(cache, index=False)
-    log(f'  分层缓存 → {cache}')
+    log(f'  stratification cache → {cache}')
     return d
 
 
 def strat_layers(maxid, parts, keys):
-    """给定配置组成，返回 {query: 'high'|'low'}（阈值 30%）。"""
+    """Return {query: 'high'|'low'} for the given config components.
+
+    Threshold: 30% maximum sequence identity.
+    """
     pools = sorted({SRC_OF_CONFIG_POOL[p] for p in parts if p in SRC_OF_CONFIG_POOL})
     cols = [c for c in pools if c in maxid.columns]
     if not cols:
@@ -212,7 +242,7 @@ def strat_layers(maxid, parts, keys):
     return {q: ('high' if x >= 0.30 else 'low') for q, x in zip(maxid['q'], v)}
 
 
-# ───────────────────────────── 主流程 ─────────────────────────────
+# ───────────────────────────── main ─────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser()
@@ -220,13 +250,16 @@ def main():
     ap.add_argument('--seeds', nargs='*', type=int, default=list(range(42, 47)))
     ap.add_argument('--n-boot', type=int, default=10000)
     ap.add_argument('--baseline', type=int, default=1,
-                    help='§6.5 配对差值的基准配置（PLAN 表 2 的配置 1 = baseline）')
+                    help='baseline config for paired differences '
+                         '(config 1 = baseline)')
     ap.add_argument('--skip-strat', action='store_true')
     ap.add_argument('--force-strat', action='store_true',
-                    help='重算 00_meta/eval_maxid.csv 缓存（重跑 mmseqs）')
+                    help='recompute the 00_meta/eval_maxid.csv cache '
+                         '(reruns mmseqs)')
     ap.add_argument('--single-model', action='store_true',
-                    help='额外输出逐种子单模型指标（较慢，每个种子各跑一次 BCa 会很久，'
-                         '这里只算点估计）')
+                    help='also output per-seed single-model metrics (slow: '
+                         'running BCa for every seed would take very long, '
+                         'so only point estimates are computed here)')
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(f'{OUT}/per_series', exist_ok=True)
@@ -237,7 +270,8 @@ def main():
     y_ood = ood.y.values.astype(float)
     y_fep = fep.y.values.astype(float)
     ser = fep.series.astype(str).values
-    log(f'评测集：OOD {len(ood)} 条；FEP {len(fep)} 配体 / {len(set(ser))} 系列')
+    log(f'Eval sets: OOD {len(ood)} entries; FEP {len(fep)} ligands / '
+        f'{len(set(ser))} series')
 
     cmeta = config_meta() if os.path.exists(f'{E}/05_configs/configs.json') else {}
     R, main_rows, single_rows = {}, [], []
@@ -246,7 +280,7 @@ def main():
     for cid in a.configs:
         pr = collect(cid, a.seeds)
         if not pr:
-            log(f'[配置 {cid:2d}] 无已完成的种子，跳过')
+            log(f'[config {cid:2d}] no completed seeds, skipping')
             continue
         po, ao = ensemble(pr, 'ood295')
         pf, af = ensemble(pr, 'fep42')
@@ -255,8 +289,9 @@ def main():
         mf = np.isfinite(pf) & np.isfinite(y_fep)
         name = cmeta.get(str(cid), {}).get('name', f'config{cid}')
         ntr = cmeta.get(str(cid), {}).get('n', np.nan)
-        log(f'[配置 {cid:2d}] {name}：种子 {sorted(pr)}；'
-            f'OOD 有效 {int(mo.sum())}/{len(po)}，FEP 有效 {int(mf.sum())}/{len(pf)}')
+        log(f'[config {cid:2d}] {name}: seeds {sorted(pr)}; '
+            f'OOD valid {int(mo.sum())}/{len(po)}, '
+            f'FEP valid {int(mf.sum())}/{len(pf)}')
 
         fm = LE.fep_metrics(ser[mf], y_fep[mf], pf[mf], n_boot=a.n_boot, seed=cid * 10)
         om = LE.ood_metrics(y_ood[mo], po[mo], n_boot=a.n_boot, seed=cid * 10 + 5)
@@ -294,12 +329,12 @@ def main():
                                     'OOD_RMSE': LE.rmse(y_ood[m1], o1[m1])})
 
     if not R:
-        log('没有任何配置有结果，退出。'); return 1
+        log('No config has any results, exiting.'); return 1
     pd.DataFrame(main_rows).to_csv(f'{OUT}/table_main.csv', index=False)
     if single_rows:
         pd.DataFrame(single_rows).to_csv(f'{OUT}/table_single.csv', index=False)
 
-    # ── gator_best：配置 3-8 中 FEP wmPCC 最高（PLAN §4.1 表2 配置10 的定义）──
+    # ── gator_best: highest FEP wmPCC among configs 3-8 (defines config 10) ──
     cand = {c: R[c]['fep']['wmPCC']['point'] for c in range(3, 9) if c in R}
     if cand:
         bc = max(cand, key=lambda c: cand[c])
@@ -307,10 +342,11 @@ def main():
                 6: 'unfiltered_30', 7: 'unfiltered_60', 8: 'unfiltered_100'}[bc]
         json.dump({'best_config': bc, 'spec': spec, 'wmPCC': cand[bc],
                    'candidates': cand}, open(f'{META}/gator_best.json', 'w'), indent=1)
-        log(f'\ngator_best = 配置 {bc}（{spec}），FEP wmPCC {cand[bc]:.4f}'
-            f'  → 配置 10 用：python 05_build_configs.py --config10 {spec}')
+        log(f'\ngator_best = config {bc} ({spec}), '
+            f'FEP wmPCC {cand[bc]:.4f}  → config 10 uses: '
+            f'python 05_build_configs.py --config10 {spec}')
 
-    # ── §6.5 配对差值 CI（基准 = 配置 a.baseline，默认配置 1）──
+    # ── paired difference CIs (baseline = config a.baseline, default 1) ──
     pd_rows = []
     B = a.baseline
     if B in ens:
@@ -336,15 +372,17 @@ def main():
                             'dFEP_hi': d_fep['hi'], 'dFEP_sig': bool(sig(d_fep)),
                             'dOOD_PCC': d_ood['point'], 'dOOD_lo': d_ood['lo'],
                             'dOOD_hi': d_ood['hi'], 'dOOD_sig': bool(sig(d_ood))})
-            log(f'  Δ配置{cid}−配置{B}：FEP wmPCC {d_fep["point"]:+.4f} '
+            log(f'  Δ config{cid} − config{B}: '
+                f'FEP wmPCC {d_fep["point"]:+.4f} '
                 f'[{d_fep["lo"]:+.4f}, {d_fep["hi"]:+.4f}] '
-                f'{"显著" if sig(d_fep) else "不显著"}；'
+                f'{"significant" if sig(d_fep) else "not significant"}; '
                 f'OOD PCC {d_ood["point"]:+.4f} '
                 f'[{d_ood["lo"]:+.4f}, {d_ood["hi"]:+.4f}] '
-                f'{"显著" if sig(d_ood) else "不显著"}')
+                f'{"significant" if sig(d_ood) else "not significant"}')
         pd.DataFrame(pd_rows).to_csv(f'{OUT}/paired_diff.csv', index=False)
     else:
-        log(f'  ! 基准配置 {B} 无结果，跳过配对差值')
+        log(f'  ! baseline config {B} has no results, '
+            f'skipping paired differences')
 
     # ── Scaling Law ──
     sc_rows = []
@@ -363,7 +401,7 @@ def main():
     if sc_rows:
         pd.DataFrame(sc_rows).to_csv(f'{OUT}/scaling.csv', index=False)
 
-    # ── §6.4 分层（探索性）──
+    # ── sequence-similarity stratification (exploratory) ──
     st_rows = []
     if not a.skip_strat:
         mi = eval_maxid(force=a.force_strat)
@@ -392,7 +430,7 @@ def main():
                                         'n': int(m.sum()), 'pcc': v1, 'ktau': v2})
             if st_rows:
                 pd.DataFrame(st_rows).to_csv(f'{OUT}/strat.csv', index=False)
-                log(f'  分层结果 → {OUT}/strat.csv')
+                log(f'  stratification results → {OUT}/strat.csv')
 
     json.dump({'configs': R, 'paired_diff': pd_rows, 'scaling': sc_rows,
                'strat': st_rows, 'n_boot': a.n_boot,
@@ -402,33 +440,47 @@ def main():
 
     # ── report.md ──
     with open(f'{OUT}/report.md', 'w') as fo:
-        fo.write('# 阶段 6 评估结果\n\n')
-        fo.write(f'- BCa Bootstrap n={a.n_boot}（FEP 系列级重采样，OOD 样本级重采样）\n')
-        fo.write(f'- FEP：{len(set(ser))} 系列 / {len(fep)} 配体；OOD：{len(ood)} 条\n')
-        fo.write('- 参考值（Valsson 等 2024）：FEP wmPCC 0.59、wmKτ 0.42\n\n')
-        fo.write('## 主表\n\n')
+        fo.write('# Stage 6 evaluation results\n\n')
+        fo.write(f'- BCa bootstrap n={a.n_boot} (FEP resampled at series '
+                 f'level, OOD resampled at sample level)\n')
+        fo.write(f'- FEP: {len(set(ser))} series / {len(fep)} ligands; '
+                 f'OOD: {len(ood)} entries\n')
+        fo.write('- Reference values (Valsson et al. 2024): '
+                 'FEP wmPCC 0.59, wmKτ 0.42\n\n')
+        fo.write('## Main table\n\n')
         fo.write(pd.DataFrame(main_rows).to_markdown(index=False, floatfmt='.4f'))
         if pd_rows:
-            fo.write(f'\n\n## 与配置 {B} 的配对差值（95% BCa CI 不含 0 即显著）\n\n')
+            fo.write(f'\n\n## Paired differences vs config {B} '
+                     f'(significant if the 95% BCa confidence interval '
+                     f'excludes 0)\n\n')
             fo.write(pd.DataFrame(pd_rows).to_markdown(index=False, floatfmt='.4f'))
         if sc_rows:
-            fo.write('\n\n## Scaling Law（value = k·log10(N) + b）\n\n')
+            fo.write('\n\n## Scaling law (value = k·log10(N) + b)\n\n')
             fo.write(pd.DataFrame(sc_rows).to_markdown(index=False, floatfmt='.4f'))
         if st_rows:
-            fo.write('\n\n## 序列相似度分层（探索性，阈值 30%）\n\n')
+            fo.write('\n\n## Sequence-similarity stratification '
+                     '(exploratory, threshold 30%)\n\n')
             fo.write(pd.DataFrame(st_rows).to_markdown(index=False, floatfmt='.4f'))
             sd = pd.DataFrame(st_rows)
             for s in sd['set'].unique():
                 miss = {'high', 'low'} - set(sd.loc[sd['set'] == s, 'layer'])
                 if miss:
-                    fo.write(f'\n\n> {s} 缺「{"/".join(sorted(miss))}」层：该层有效样本 < 5 条，'
-                             f'即所有 {s} 靶点与训练源靶点池的最大序列一致性都落在同一侧，'
-                             f'该评测集无法做相似度分层。\n')
-        fo.write('\n\n### 口径说明\n'
-                 '- 分层用源级靶点池（Gator 规模子集为随机抽样，靶点覆盖与 100% 版基本一致）。\n'
-                 '- BindingNet / BindingDB-DCS 无独立序列池，其靶点为 PDB 条目，'
-                 '用 PDBbind 序列池代表。\n')
-    log(f'\n产物 → {OUT}/{{results.json, table_main.csv, paired_diff.csv, '
+                    fo.write(f'\n\n> {s} is missing the '
+                             f'"{"/".join(sorted(miss))}" stratum: '
+                             f'fewer than 5 valid samples in that stratum, '
+                             f'i.e. the maximum sequence identity of every '
+                             f'{s} target to the training source target '
+                             f'pools falls on the same side of the '
+                             f'threshold, so this evaluation set cannot be '
+                             f'stratified by similarity.\n')
+        fo.write('\n\n### Methodological notes\n'
+                 '- Stratification uses source-level target pools (the Gator '
+                 'size subsets are random samples whose target coverage is '
+                 'essentially identical to the 100% version).\n'
+                 '- BindingNet / BindingDB-DCS have no separate sequence '
+                 'pool; their targets are PDB entries, so the PDBbind '
+                 'sequence pool is used as a proxy.\n')
+    log(f'\nOutputs → {OUT}/{{results.json, table_main.csv, paired_diff.csv, '
         f'scaling.csv, strat.csv, per_series/, report.md}}')
     return 0
 
