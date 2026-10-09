@@ -129,9 +129,12 @@ AEV-PLIG/                    upstream reference implementation (BSD-3)
 
 ## Not included in this repository
 
-**Model checkpoints** (55 × 29 MB). To be deposited on Zenodo; the DOI will
-be added here. Without them, `07_evaluate.py` still runs from the delivered
-prediction arrays.
+**Model checkpoints** (55 × 29 MB), deposited on Zenodo:
+[10.5281/zenodo.23248276](https://doi.org/10.5281/zenodo.23248276)
+(all versions: [10.5281/zenodo.23248275](https://doi.org/10.5281/zenodo.23248275)).
+Each checkpoint carries its own pK standardisation constants, so inference
+needs no further files. The evaluation below does not require them: it runs
+from the prediction arrays already in this repository.
 
 **Raw structure files** (~183 GB) and **graph featurisation output**
 (7.6 GB). The latter is a deterministic intermediate, rebuilt by
