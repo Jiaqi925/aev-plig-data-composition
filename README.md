@@ -1,6 +1,6 @@
 # Training data composition in protein–ligand binding affinity prediction
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23248275.svg)](https://doi.org/10.5281/zenodo.23248275)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23248275-blue)](https://doi.org/10.5281/zenodo.23248275)
 
 Code and experimental output for an MRes thesis investigating how the
 composition of training data affects the performance of a machine-learning
