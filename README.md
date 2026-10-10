@@ -1,5 +1,7 @@
 # Training data composition in protein–ligand binding affinity prediction
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23248275.svg)](https://doi.org/10.5281/zenodo.23248275)
+
 Code and experimental output for an MRes thesis investigating how the
 composition of training data affects the performance of a machine-learning
 scoring function. Eleven training configurations are compared under an
@@ -166,8 +168,10 @@ and resolved at runtime against `$STACEY_ROOT`. When that variable is unset,
 the parent directory of `scripts/` is used, so the repository runs from any
 location.
 
-Comments in the data-preparation and evaluation scripts are in English;
-translation of the remaining auxiliary scripts is in progress.
+Two source labels in `09_uniprot_coverage.py` and `figs/fig2_coverage.py`
+are in Chinese. They are written into `uniprot_coverage.csv` and used as
+lookup keys by the figure script, so they are kept as they are to stay
+consistent with the delivered data.
 
 ## Citation and licence
 
