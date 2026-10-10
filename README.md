@@ -91,7 +91,7 @@ pairs, test-set flags, and the two stage reports `report_03a.json` /
 ## Repository layout
 
 ```
-scripts/                     11-stage pipeline plus three shared libraries
+scripts/                     numbered pipeline stages plus shared libraries
   leak.py                    evaluation-set PDB IDs to exclude (330)
   01-03b                     index construction, cleaning, deduplication
   04_generate_graphs.py      AEV + PLIG graph featurisation
@@ -99,6 +99,7 @@ scripts/                     11-stage pipeline plus three shared libraries
   06_train_all.py            concurrent training and inference
   07_evaluate.py             metrics, BCa intervals, paired differences
   08-10                      integrity audit, coverage, stratification
+  99_make_smoke_config.py    small config for smoke-testing the pipeline
   lib_data / lib_eval / lib_model
 
 experiments/
@@ -135,7 +136,7 @@ AEV-PLIG/                    upstream reference implementation (BSD-3)
 [10.5281/zenodo.23248276](https://doi.org/10.5281/zenodo.23248276)
 (all versions: [10.5281/zenodo.23248275](https://doi.org/10.5281/zenodo.23248275)).
 Each checkpoint carries its own pK standardisation constants, so inference
-needs no further files. The evaluation below does not require them: it runs
+needs no further files. The evaluation above does not require them: it runs
 from the prediction arrays already in this repository.
 
 **Raw structure files** (~183 GB) and **graph featurisation output**
@@ -151,15 +152,19 @@ from the prediction arrays already in this repository.
 | GatorAffinity-DB | ~36 GB | https://github.com/Vina-Lab/GatorAffinity-DB |
 
 The GatorAffinity index CSV (900 MB) is downloaded separately from the same
-repository into `datasets/index/gatoraffinity/`. This study used 65,001 of
-the 463,867 indexed structures, limited by storage;
+repository into `datasets/index/gatoraffinity/`. Of its 463,867 entries,
+381,291 carry a usable Ki or Kd; 65,001 of those had structures downloaded,
+limited by storage. Internal deduplication leaves 54,290, and after
+leakage removal and evaluation-set separation the unfiltered version holds
+52,773 pairs and the confidence-filtered version 48,286.
 `03_build_gator_index.py` skips missing entries automatically.
 
 Third-party evaluation-set inputs and the BindingDB-DCS series files are
 also omitted, as they are not ours to redistribute.
 
 External tools: TM-align (structure similarity) and mmseqs2 (sequence
-similarity) must be on `PATH` to rerun the deduplication stages.
+similarity) must be on `PATH` to rerun the deduplication stages. mmseqs2
+is also used by the stratified analysis in `07_evaluate.py`.
 
 ## Notes
 
