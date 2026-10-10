@@ -40,10 +40,10 @@ from torch_geometric.nn import global_max_pool as gmp
 from torch_geometric.nn import global_mean_pool as gap
 from torch_geometric.nn import BatchNorm
 
-NODE_DIM = 367          # 15 维 PLIG + 352 维 AEV
-EDGE_DIM = 4            # 键型 one-hot [single, aromatic, double, triple]
+NODE_DIM = 367          # 15-dim PLIG + 352-dim AEV
+EDGE_DIM = 4            # bond-type one-hot [single, aromatic, double, triple]
 
-# training.py parse_args() 的默认值
+# defaults from training.py parse_args()
 DEFAULT_CONFIG = SimpleNamespace(hidden_dim=256, head=3,
                                  activation_function='leaky_relu')
 
@@ -106,11 +106,12 @@ class GATv2Net(torch.nn.Module):
         x = self.fc3(x)
         x = self.activation(x)
         x = self.bn_connect3(x)
-        return self.out(x)          # (B, 1) —— 与参考实现一致，调用方负责 view
+        return self.out(x)          # (B, 1), as upstream; caller reshapes
 
 
 def init_weights(layer):
-    """逐字复制 utils.init_weights（含 `layer.bias is True` 的原样行为）。"""
+    """Verbatim copy of utils.init_weights, including the upstream
+    `layer.bias is True` behaviour."""
     if hasattr(layer, "weight") and "BatchNorm" not in str(layer):
         torch.nn.init.xavier_normal_(layer.weight)
     if hasattr(layer, "bias"):
@@ -119,13 +120,13 @@ def init_weights(layer):
 
 
 def build_model(node_dim=NODE_DIM, edge_dim=EDGE_DIM, config=None):
-    """按参考实现 training.py 的方式建模并初始化。"""
+    """Build and initialise the model as training.py does upstream."""
     m = GATv2Net(node_dim, edge_dim, config or DEFAULT_CONFIG)
     m.apply(init_weights)
     return m
 
 
-AEVPLIG = GATv2Net      # 兼容旧脚本里的名字
+AEVPLIG = GATv2Net      # alias kept for older scripts
 
 
 def n_params(m):
@@ -137,4 +138,4 @@ if __name__ == '__main__':
     print(f'GATv2Net(node={NODE_DIM}, edge={EDGE_DIM}, '
           f'hidden={DEFAULT_CONFIG.hidden_dim}, head={DEFAULT_CONFIG.head}, '
           f'layers={m.number_GNN_layers}, act={m.act})')
-    print(f'参数量 {n_params(m):,}')
+    print(f'parameters {n_params(m):,}')

@@ -1,16 +1,22 @@
 #!/usr/bin/env python
 """
-补充任务 1：OOD 295 的靶点 UniProt 集合与三个训练源求交，报覆盖率。
+Supplementary task 1: intersect the target UniProt set of OOD 295 with each of
+the three training sources and report coverage.
 
-口径说明：
-  - OOD / PDBbind 无 UniProt 列，用 SIFTS pdb_chain_uniprot.tsv.gz 按 PDB ID 映射
-    （一个 PDB 可对应多条链/多个 UniProt，全部纳入该 PDB 的 UniProt 集合）
-  - HiQBind 用自带 'Protein UniProtID'
-  - Gator 用自带 'UniProt (SwissProt) Primary ID of Target Chain'
-  - 覆盖率 = |OOD ∩ 源| / |OOD|，即 OOD 靶点中有多少能在该源里找到同一 UniProt
+Conventions:
+  - OOD / PDBbind have no UniProt column; they are mapped by PDB ID using
+    SIFTS pdb_chain_uniprot.tsv.gz
+    (one PDB may map to several chains / UniProt IDs; all are included in that
+    PDB's UniProt set)
+  - HiQBind uses its own 'Protein UniProtID'
+  - Gator uses its own 'UniProt (SwissProt) Primary ID of Target Chain'
+  - coverage = |OOD ∩ source| / |OOD|, i.e. the fraction of OOD targets whose
+    UniProt can also be found in that source
 """
 import gzip
 import json
+import os
+
 import pandas as pd
 
 ROOT = os.environ.get('STACEY_ROOT',
@@ -19,13 +25,12 @@ E = f'{ROOT}/experiments'
 IDX = f'{ROOT}/datasets/index'
 OUT = f'{E}/09_uniprot_coverage'
 
-import os
 os.makedirs(OUT, exist_ok=True)
 log = lambda *a: print(*a, flush=True)
 
 
 def load_sifts():
-    """PDB ID(4位小写) -> set(UniProt)"""
+    """PDB ID (4 lowercase characters) -> set(UniProt)"""
     m = {}
     with gzip.open(f'{IDX}/_mappings/pdb_chain_uniprot.tsv.gz', 'rt') as f:
         for line in f:
@@ -39,13 +44,15 @@ def load_sifts():
 
 
 def norm(s):
-    """UniProt 归一化：去同工异构体后缀、大写去空白"""
+    """Normalize a UniProt ID: strip the isoform suffix, uppercase, remove
+    whitespace"""
     s = str(s).strip().upper()
     return s.split('-')[0] if s and s != 'NAN' else ''
 
 
 def expand(series):
-    """一个单元格可能有多个 UniProt（分号/逗号分隔）"""
+    """A single cell may hold several UniProt IDs (separated by semicolons or
+    commas)"""
     out = set()
     for v in series.dropna():
         for tok in str(v).replace(',', ';').split(';'):
@@ -56,9 +63,9 @@ def expand(series):
 
 
 def main():
-    log('[1/4] 载入 SIFTS 映射 …')
+    log('[1/4] loading SIFTS mapping …')
     sifts = load_sifts()
-    log(f'  SIFTS 覆盖 {len(sifts)} 个 PDB ID')
+    log(f'  SIFTS covers {len(sifts)} PDB IDs')
 
     # ---------- OOD 295 ----------
     ood = pd.read_csv(f'{IDX}/_testsets/index_oodtest.csv')
@@ -73,11 +80,11 @@ def main():
         if u:
             ood_mapped += 1
             ood_uni |= u
-    log(f'\n[2/4] OOD 295：{ood_mapped}/295 个 PDB 成功映射到 UniProt，'
-        f'共 {len(ood_uni)} 个唯一 UniProt')
+    log(f'\n[2/4] OOD 295: {ood_mapped}/295 PDBs mapped to UniProt, '
+        f'{len(ood_uni)} unique UniProt IDs in total')
 
-    # ---------- 三个训练源 ----------
-    log('\n[3/4] 载入三个训练源的 UniProt 集合 …')
+    # ---------- Three training sources ----------
+    log('\n[3/4] loading the UniProt sets of the three training sources …')
 
     pb = pd.read_csv(f'{E}/01_baseline_index/pdbbind_clean.csv')
     pb_uni = set()
@@ -88,21 +95,25 @@ def main():
         if u:
             pb_mapped += 1
             pb_uni |= u
-    log(f'  PDBbind  {len(pb):>6d} 条 → {pb_mapped} 条可映射，{len(pb_uni)} 个唯一 UniProt')
+    log(f'  PDBbind  {len(pb):>6d} entries → {pb_mapped} mappable, '
+        f'{len(pb_uni)} unique UniProt IDs')
 
     hq = pd.read_csv(f'{E}/02_hiqbind/hiqbind_dedup.csv')
     hq_uni = expand(hq['Protein UniProtID'])
-    log(f'  HiQBind  {len(hq):>6d} 条 → {len(hq_uni)} 个唯一 UniProt（源自带字段）')
+    log(f'  HiQBind  {len(hq):>6d} entries → {len(hq_uni)} unique UniProt IDs '
+        f'(source-provided field)')
 
     ga = pd.read_csv(f'{E}/03_gator/gator_dedup.csv')
     ga_col = 'UniProt (SwissProt) Primary ID of Target Chain'
     ga_uni = expand(ga[ga_col])
     ga_f_uni = expand(ga.loc[ga.in_filtered_100, ga_col])
-    log(f'  Gator    {len(ga):>6d} 条 → {len(ga_uni)} 个唯一 UniProt（源自带字段）')
-    log(f'    其中筛选版(conf≥0.7) → {len(ga_f_uni)} 个唯一 UniProt')
+    log(f'  Gator    {len(ga):>6d} entries → {len(ga_uni)} unique UniProt IDs '
+        f'(source-provided field)')
+    log(f'    of which filtered version (conf≥0.7) → {len(ga_f_uni)} unique '
+        f'UniProt IDs')
 
-    # ---------- 求交与覆盖率 ----------
-    log('\n[4/4] OOD 靶点覆盖率 =  |OOD ∩ 源| / |OOD|')
+    # ---------- Intersection and coverage ----------
+    log('\n[4/4] OOD target coverage =  |OOD ∩ source| / |OOD|')
     rows = []
     srcs = [
         ('PDBbind', len(pb), pb_uni),
@@ -118,10 +129,11 @@ def main():
                      'n_uniprot_ood': len(ood_uni),
                      'n_intersect': len(inter),
                      'coverage': cov})
-        log(f'  {name:<20s} 源 {len(uni):>5d} 个 UniProt，交集 {len(inter):>3d}，'
-            f'覆盖率 {cov*100:>5.1f}%')
+        log(f'  {name:<20s} source {len(uni):>5d} UniProt IDs, '
+            f'intersection {len(inter):>3d}, coverage {cov*100:>5.1f}%')
 
-    # 三源并集（baseline 中含 PDBbind，配置2 加 HiQBind，配置3-8 加 Gator）
+    # Unions of sources (baseline contains PDBbind, config 2 adds HiQBind,
+    # configs 3-8 add Gator)
     for name, uni in [('PDBbind ∪ HiQBind', pb_uni | hq_uni),
                       ('PDBbind ∪ HiQBind ∪ Gator', pb_uni | hq_uni | ga_uni)]:
         inter = ood_uni & uni
@@ -130,11 +142,11 @@ def main():
                      'n_uniprot_source': len(uni),
                      'n_uniprot_ood': len(ood_uni),
                      'n_intersect': len(inter), 'coverage': cov})
-        log(f'  {name:<20s} 源 {len(uni):>5d} 个 UniProt，交集 {len(inter):>3d}，'
-            f'覆盖率 {cov*100:>5.1f}%')
+        log(f'  {name:<20s} source {len(uni):>5d} UniProt IDs, '
+            f'intersection {len(inter):>3d}, coverage {cov*100:>5.1f}%')
 
-    # ---------- 按 PDB 粒度：多少个 OOD 复合物的靶点被覆盖 ----------
-    log('\n[附] 按 OOD 复合物（PDB）粒度统计被覆盖的个数：')
+    # ---------- Per PDB: how many OOD complexes have a covered target --------
+    log('\n[extra] covered OOD complexes, counted per complex (PDB):')
     pdb_rows = []
     for name, _, uni in srcs:
         hit = 0
@@ -154,7 +166,8 @@ def main():
                'by_uniprot': rows, 'by_pdb': pdb_rows,
                'sifts_version': 'pdb_chain_uniprot.tsv.gz (PDB 31.26 / UniProt 2026.03)'},
               open(f'{OUT}/coverage.json', 'w'), indent=1, ensure_ascii=False)
-    log(f'\n产物 → {OUT}/{{uniprot_coverage.csv, uniprot_coverage_by_pdb.csv, coverage.json}}')
+    log(f'\nOutputs → {OUT}/{{uniprot_coverage.csv, '
+        f'uniprot_coverage_by_pdb.csv, coverage.json}}')
 
 
 if __name__ == '__main__':

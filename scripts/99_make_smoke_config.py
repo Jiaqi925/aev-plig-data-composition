@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 """
-冒烟测试专用脚手架（不属于 PLAN 的任何实验配置）。
+Scaffold for smoke testing only (not one of the experiment configurations).
 
-在 04_graphs 尚未全部生成完时，用**已有图的源**装配一个临时配置 99，
-以便提前把「训练 → OOD/FEP 推理 → 阶段 6 评估」整条链路调通。
+While 04_graphs has not been fully generated, assemble a temporary config 99
+from the **sources whose graphs already exist**, so that the whole pipeline
+"training → OOD/FEP inference → stage 6 evaluation" can be debugged early.
 
-产物：experiments/05_configs/config_99.csv + configs.json 里的 "99" 条目
-      （configs.json 是增量更新，正式配置 1–10 不受影响）
+Outputs: experiments/05_configs/config_99.csv + the "99" entry in configs.json
+         (configs.json is updated incrementally; the real configs 1–10 are
+         unaffected)
 
-用法：
-  python 99_make_smoke_config.py                 # 默认 pdbbind 抽 3000 条
+Usage:
+  python 99_make_smoke_config.py                 # default: 3000 from pdbbind
   python 99_make_smoke_config.py --n 800 --sources pdbbind hiqbind
 """
 import os, sys, json, argparse
@@ -43,15 +45,15 @@ def main():
     for s in a.sources:
         f = f'{GRAPHS}/{s}/ids.npy'
         if not os.path.exists(f):
-            print(f'  ! {s} 图未生成，跳过', flush=True)
+            print(f'  ! {s} graphs not generated, skipped', flush=True)
             continue
         have = set(np.load(f).tolist())
         d = pd.read_csv(SRC_INDEX[s])
         d = d[d.unique_id.isin(have)]
         frames.append(pd.DataFrame({'source': s, 'unique_id': d.unique_id, 'pK': d.pK}))
-        print(f'  {s}: 图 {len(have)}，索引可用 {len(d)}', flush=True)
+        print(f'  {s}: graphs {len(have)}, in index {len(d)}', flush=True)
     if not frames:
-        print('没有任何源可用，退出。'); return 1
+        print('No source available, exiting.'); return 1
 
     d = pd.concat(frames, ignore_index=True)
     if a.n and len(d) > a.n:
@@ -62,9 +64,10 @@ def main():
     meta = json.load(open(mp)) if os.path.exists(mp) else {}
     meta[str(a.cid)] = {'name': f'SMOKE({"+".join(a.sources)})', 'parts': a.sources,
                         'n': int(len(d)), 'by_source': d.source.value_counts().to_dict(),
-                        'note': '冒烟测试脚手架，非 PLAN 配置'}
+                        'note': 'smoke-test scaffold, not an experiment config'}
     json.dump(meta, open(mp, 'w'), indent=1, ensure_ascii=False)
-    print(f'\n配置 {a.cid}：{len(d)} 条 → {OUT}/config_{a.cid:02d}.csv', flush=True)
+    print(f'\nConfig {a.cid}: {len(d)} entries → {OUT}/config_{a.cid:02d}.csv',
+          flush=True)
     return 0
 
 

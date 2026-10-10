@@ -1,17 +1,24 @@
 #!/usr/bin/env python
 """
-阶段 2b 补丁：修复 PDBbind 侧无法回读的配体 SMILES。
+Stage 2b patch: fix PDBbind-side ligand SMILES that cannot be read back.
 
-02b 从 SDF 提取 SMILES 时，对 sanitize 失败的分子退回 sanitize=False 读取，
-产生了 406 条化学上非法的 SMILES（如 C 带 5 个 H、Cl-Cl 键），RDKit 无法回读，
-后续 ECFP4 指纹也就算不出来。
+When 02b extracted SMILES from SDF, molecules that failed sanitization were
+re-read with sanitize=False, producing 406 chemically invalid SMILES (e.g. C
+with 5 H, Cl-Cl bonds) that RDKit cannot read back, so their ECFP4
+fingerprints cannot be computed either.
 
-影响方向不容忽视：PDBbind 侧配体缺指纹 → 对应的 HiQBind 样本无法命中配体判据
-→ 被误判为「净新增」。这会**高估**净新增数，与保守口径相反，故必须修。
+The direction of the effect matters: a PDBbind-side ligand without a
+fingerprint → the corresponding HiQBind samples cannot hit the ligand
+criterion → they are wrongly counted as "net new". This **overestimates** the
+net new count, the opposite of the conservative convention, so it must be
+fixed.
 
-修法：对这批分子改从 {pdb}_ligand.mol2 读取（mol2 带显式键级，PDBbind 的
-mol2 键级标注比 SDF 更可靠）。可救回 368 条；余 38 条（多为金属簇/异常价态）
-两种格式都无法消毒，如实置空并计数上报，不做任何猜测性修补。
+Fix: re-read these molecules from {pdb}_ligand.mol2 instead (mol2 carries
+explicit bond orders, and PDBbind's mol2 bond-order annotations are more
+reliable than its SDF). This recovers 368 entries; the remaining 38 (mostly
+metal clusters / unusual valences) cannot be sanitized in either format, so
+they are set to empty and counted in the report as-is, without any
+speculative repair.
 """
 import os, sys, json
 import pandas as pd
@@ -51,13 +58,14 @@ def main():
     with Pool(min(64, os.cpu_count())) as p:
         ok = p.map(readable, d.smiles.tolist(), chunksize=256)
     bad = [i for i, o in zip(d.pdb_id, ok) if not o]
-    log(f'总 {len(d)} 条，不可回读 {len(bad)} 条 → 改从 mol2 读取')
+    log(f'{len(d)} entries in total, {len(bad)} cannot be read back → '
+        f're-reading from mol2')
 
     with Pool(min(64, os.cpu_count())) as p:
         fixed = dict(p.map(from_mol2, [(i, ref.get(i, False)) for i in bad],
                            chunksize=8))
     n_ok = sum(1 for v in fixed.values() if v)
-    log(f'  mol2 救回 {n_ok}，仍失败 {len(bad) - n_ok}')
+    log(f'  recovered from mol2 {n_ok}, still failing {len(bad) - n_ok}')
 
     d['smiles_src'] = 'sdf'
     smi = d.smiles.tolist()
@@ -69,8 +77,8 @@ def main():
         smi[k], src[k] = (v, 'mol2') if v else (None, 'fail')
     d['smiles'], d['smiles_src'] = smi, src
 
-    log(f'  最终有效 SMILES {d.smiles.notna().sum()} / {len(d)}'
-        f'（来源 {d.smiles_src.value_counts().to_dict()}）')
+    log(f'  final valid SMILES {d.smiles.notna().sum()} / {len(d)}'
+        f' (sources {d.smiles_src.value_counts().to_dict()})')
     d.to_csv(f'{META}/pdbbind_smiles_seq.csv', index=False)
 
     r = json.load(open(f'{META}/report_02b.json'))
@@ -78,7 +86,7 @@ def main():
               'smiles_recovered_from_mol2': int(n_ok),
               'smiles_final_missing': int(d.smiles.isna().sum())})
     json.dump(r, open(f'{META}/report_02b.json', 'w'), indent=1)
-    log(f'\n已更新 {META}/pdbbind_smiles_seq.csv')
+    log(f'\nUpdated {META}/pdbbind_smiles_seq.csv')
     return 0
 
 

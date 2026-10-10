@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 """
-补充任务 2：对 OOD 相似度分层的 low / high 层，重跑现成的 BCa 与配对差值代码。
+Supplementary task 2: rerun the existing BCa and paired difference code on the
+low / high layers of the OOD similarity stratification.
 
-动机：现有 strat.csv 只有点估计，报告里只能写「不宜过度解读」。本脚本给每层
-配上 BCa 95% CI，并做各配置 vs 配置1 的层内配对差值检验，使「low 层排名」
-这一观察有统计口径。
+Motivation: the existing strat.csv only has point estimates, so the report
+could only say "should not be over-interpreted". This script gives each layer
+a 95% BCa confidence interval and runs a within-layer paired difference test of
+each config vs config 1, so that the "low-layer ranking" observation has a
+statistical basis.
 
-完全复用 lib_eval 的 bca_ci / paired_diff_ci / pcc / ktau，分层口径与
-07_evaluate.py 的 strat_layers 一致（max_seqid < 0.30 判为 low）。
+Fully reuses bca_ci / paired_diff_ci / pcc / ktau from lib_eval; the stratified
+layer definition matches strat_layers in 07_evaluate.py (max_seqid < 0.30 is
+low).
 """
 import json
 import os
@@ -33,7 +37,8 @@ log = lambda *a: print(*a, flush=True)
 
 
 def load_ens(cid):
-    """载入某配置 5 种子集成的 OOD 预测（与 07_evaluate 的 ensemble 同口径：逐样本均值）"""
+    """Load the 5-seed ensemble OOD predictions of one config (same convention
+    as the ensemble in 07_evaluate: per-sample mean)"""
     ps = []
     for s in SEEDS:
         f = f'{TRAIN}/cfg{cid:02d}/seed{s}/pred_ood295.npy'
@@ -44,12 +49,13 @@ def load_ens(cid):
 
 
 def main():
-    # ---------- 真值 ----------
+    # ---------- Ground truth ----------
     ood = pd.read_csv(f'{IDX}/_testsets/index_oodtest.csv')
     ood = ood[ood.split == 'test'].reset_index(drop=True)
     y = ood['-logKd/Ki'].values.astype(float)
 
-    # ---------- 分层标签：复用 07_evaluate 的 eval_maxid.csv，逐配置取所含源的最大相似度 ----------
+    # ---------- Layer labels: reuse eval_maxid.csv from 07_evaluate; for each
+    # config take the max similarity over the sources it contains ----------
     maxid = pd.read_csv(f'{E}/00_meta/eval_maxid.csv')
     cmeta = json.load(open(f'{E}/05_configs/configs.json'))
     SRC_OF_POOL = {'pdbbind': 'pdbbind', 'bindingnet': 'pdbbind',
@@ -67,18 +73,19 @@ def main():
         lay = {q: ('high' if x >= 0.30 else 'low') for q, x in zip(maxid['q'], v)}
         return np.array([lay.get(k, 'unknown') for k in ood_keys])
 
-    log('分层依据：experiments/00_meta/eval_maxid.csv（mmseqs 评测靶点 vs 各源靶点池），'
-        '阈值 seqid 0.30，逐配置按其所含源取最大值')
+    log('Stratification basis: experiments/00_meta/eval_maxid.csv (mmseqs, '
+        'evaluation targets vs each source target pool), threshold seqid '
+        '0.30, per config the max over the sources it contains')
 
-    # ---------- 各配置分层 BCa ----------
-    log(f'\n[1/2] 逐配置分层 BCa（n_boot={N_BOOT}）…')
+    # ---------- Stratified BCa per config ----------
+    log(f'\n[1/2] stratified BCa per config (n_boot={N_BOOT}) …')
     rows = []
     ens = {}
     lays = {}
     for cid in range(1, 12):
         p = load_ens(cid)
         if p is None:
-            log(f'  配置 {cid}: 预测缺失，跳过')
+            log(f'  config {cid}: predictions missing, skipped')
             continue
         ens[cid] = p
         layer = layers_for(cid)
@@ -106,12 +113,13 @@ def main():
                 'rmse': r_rmse['point'], 'rmse_lo': r_rmse['lo'], 'rmse_hi': r_rmse['hi'],
                 'method': r_pcc['method']})
             log(f'  cfg{cid:02d} {L:<4s} n={n:>3d}  PCC {r_pcc["point"]:.4f} '
-                f'[{r_pcc["lo"]:.4f}, {r_pcc["hi"]:.4f}] 宽 {r_pcc["hi"]-r_pcc["lo"]:.4f}')
+                f'[{r_pcc["lo"]:.4f}, {r_pcc["hi"]:.4f}] '
+                f'width {r_pcc["hi"]-r_pcc["lo"]:.4f}')
 
     pd.DataFrame(rows).to_csv(f'{OUT}/strat_ci.csv', index=False)
 
-    # ---------- 层内配对差值 vs 配置 1 ----------
-    log('\n[2/2] 层内配对差值（各配置 − 配置1）…')
+    # ---------- Within-layer paired difference vs config 1 ----------
+    log('\n[2/2] within-layer paired difference (each config − config 1) …')
     pd_rows = []
     if 1 in ens:
         p1 = ens[1]
@@ -119,7 +127,9 @@ def main():
             if cid == 1:
                 continue
             p2 = ens[cid]
-            # 配对必须在同一批单位上，故用基准配置(1)的分层，避免两配置层成员不同
+            # Pairing must be on the same set of units, so the layers of the
+            # reference config (1) are used, avoiding different layer members
+            # between the two configs
             layer = lays[1]
             for L in ['high', 'low']:
                 m = (layer == L) & np.isfinite(p1) & np.isfinite(p2) & np.isfinite(y)
@@ -140,12 +150,15 @@ def main():
                                 'method': d['method']})
                 log(f'  cfg{cid:02d} {L:<4s} ΔPCC {d["point"]:+.4f} '
                     f'[{d["lo"]:+.4f}, {d["hi"]:+.4f}] '
-                    f'{"显著" if sig else "不显著"}')
+                    f'{"significant" if sig else "not significant"}')
         pd.DataFrame(pd_rows).to_csv(f'{OUT}/strat_paired_diff.csv', index=False)
 
-    # ---------- high − low 层内落差的 CI（同一配置内，两层独立，用差值的正态近似不合适，
-    #            改为分别报 CI 并说明区间是否重叠）----------
-    log('\n[附] high 与 low 的 CI 是否重叠（重叠 ⇒ 落差在统计上不可断言）：')
+    # ---------- CI of the high − low drop (within one config the two layers
+    #            are independent and a normal approximation of the difference
+    #            is inappropriate, so instead report each CI separately and
+    #            state whether the intervals overlap) ----------
+    log('\n[extra] do the high and low CIs overlap (overlap ⇒ the drop cannot '
+        'be asserted statistically):')
     ov_rows = []
     df = pd.DataFrame(rows)
     for cid in sorted(ens):
@@ -161,19 +174,22 @@ def main():
                         'ci_overlap': bool(overlap)})
         log(f'  cfg{cid:02d} high [{h.pcc_lo:.3f},{h.pcc_hi:.3f}] vs '
             f'low [{l.pcc_lo:.3f},{l.pcc_hi:.3f}] '
-            f'落差 {h.pcc-l.pcc:.4f} {"重叠" if overlap else "不重叠"}')
+            f'drop {h.pcc-l.pcc:.4f} {"overlap" if overlap else "no overlap"}')
     pd.DataFrame(ov_rows).to_csv(f'{OUT}/strat_overlap.csv', index=False)
 
     json.dump({'n_boot': N_BOOT, 'seeds': SEEDS,
-               'layer_rule': ('eval_maxid.csv (mmseqs, 评测靶点 vs 各源靶点池), '
-                              'seqid >= 0.30 -> high, else low; 逐配置按所含源取最大值'),
-               'paired_diff_layer_basis': 'config 1 (保证配对单位一致)',
+               'layer_rule': ('eval_maxid.csv (mmseqs, evaluation targets vs '
+                              'the target pool of each source), seqid >= 0.30 '
+                              '-> high, else low; per config, the maximum over '
+                              'the sources it contains'),
+               'paired_diff_layer_basis': ('config 1 (keeps the pairing unit '
+                                           'consistent)'),
                'n_by_config': {str(c): {'high': int((lays[c] == 'high').sum()),
                                         'low': int((lays[c] == 'low').sum())}
                                for c in sorted(lays)},
                'strat_ci': rows, 'paired_diff': pd_rows, 'overlap': ov_rows},
               open(f'{OUT}/strat_ci.json', 'w'), indent=1, default=float)
-    log(f'\n产物 → {OUT}/{{strat_ci.csv, strat_paired_diff.csv, '
+    log(f'\nOutputs → {OUT}/{{strat_ci.csv, strat_paired_diff.csv, '
         f'strat_overlap.csv, strat_ci.json}}')
 
 

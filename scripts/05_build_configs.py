@@ -1,22 +1,28 @@
 #!/usr/bin/env python
 """
-阶段 5 前置：装配 10 个实验配置的训练索引表（PLAN §4.1 表 2）。
+Pre-stage 5: assemble the training index tables of the 10 experiment
+configurations.
 
-配置组成：
-   1 baseline                       = PDBbind + BindingNet + BindingDB-DCS（直接拼接）
-   2 baseline + hiqbind             + HiQBind 去重后全量
+Configuration composition:
+   1 baseline                  = PDBbind + BindingNet + BindingDB-DCS
+                                 (direct concatenation)
+   2 baseline + hiqbind        + all of HiQBind after deduplication
    3/4/5 baseline + gator_filtered_30/60/100%
    6/7/8 baseline + gator_unfiltered_30/60/100%
-   9 bindingnet + dcs + hiqbind     （移除 PDBbind）
-  10 配置 9 + gator_best            （待配置 3-8 的 FEP wmPCC 出来后用 --config10 指定）
+   9 bindingnet + dcs + hiqbind  (PDBbind removed)
+  10 config 9 + gator_best     (set with --config10 once the FEP wmPCC of
+                                configs 3-8 is available)
 
-同时执行 PLAN §3.4.2 的泄漏验证：每个配置的 PDB ID 集合与 OOD 295 / FEP 参考 PDB
-求交集，必须为空；Gator 侧无真实 PDB ID，其泄漏控制已在 03b 完成。
-若 04_graphs 已生成，则同时剔除没有图的样本并如实报告数量。
+The leakage check is performed at the same time: each configuration's PDB ID
+set is intersected with the OOD 295 / FEP reference PDBs and must be empty;
+the Gator side has no real PDB IDs, and its leakage control was already done
+in 03b.
+If 04_graphs has been generated, samples without a graph are also removed and
+their number is reported as-is.
 
-用法：
-  python 05_build_configs.py                       # 建配置 1-9
-  python 05_build_configs.py --config10 filtered_60  # 补建配置 10
+Usage:
+  python 05_build_configs.py                       # build configs 1-9
+  python 05_build_configs.py --config10 filtered_60  # add config 10
 """
 import os, sys, json, argparse
 import numpy as np
@@ -79,7 +85,8 @@ COMPOSE = {
 
 
 def graph_ids():
-    """返回 {source: set(uid)}；缺目录则该源返回 None（表示不过滤）。"""
+    """Return {source: set(uid)}; if the directory is missing, that source
+    maps to None (meaning no filtering)."""
     out = {}
     for s in ['pdbbind', 'bindingnet', 'bindingdb_dcs', 'hiqbind', 'gatoraffinity']:
         f = f'{GRAPHS}/{s}/ids.npy'
@@ -90,14 +97,16 @@ def graph_ids():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--config10', default=None,
-                    help='如 filtered_60 / unfiltered_100，用于装配配置 10')
+                    help='e.g. filtered_60 / unfiltered_100; used to '
+                         'assemble config 10')
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
 
     parts = load_parts()
     gi = graph_ids()
     for s, v in gi.items():
-        log(f'  图可用 {s}: {"未生成" if v is None else len(v)}')
+        log(f'  graphs available {s}: '
+            f'{"not generated" if v is None else len(v)}')
 
     leak = json.load(open(f'{META}/leakage_ids.json'))
     leak_ids = set(leak['excluded_pdb_ids'])
@@ -112,12 +121,13 @@ def main():
         d = pd.concat([parts[k] for k in keys], ignore_index=True)
         n0 = len(d)
 
-        # 泄漏验证（Gator 行 pdb_id 为空，不参与）
+        # Leakage check (Gator rows have an empty pdb_id and are skipped)
         pid = d.pdb_id.fillna('').astype(str).str.lower().str[:4]
         bad = pid.isin(leak_ids) & (pid != '')
-        assert not bad.any(), f'配置 {cid} 仍含泄漏 PDB ID {sorted(set(pid[bad]))[:10]}'
+        assert not bad.any(), (f'config {cid} still contains leaked PDB IDs '
+                               f'{sorted(set(pid[bad]))[:10]}')
 
-        # 图可用性过滤
+        # Filter by graph availability
         drops = {}
         keep = np.ones(len(d), bool)
         for s, ids in gi.items():
@@ -136,11 +146,11 @@ def main():
         meta[str(cid)] = {'name': NAMES[cid], 'parts': keys, 'n': int(len(d)),
                           'n_before_graph_filter': int(n0),
                           'dropped_no_graph': drops, 'by_source': cnt}
-        log(f'[配置 {cid:2d}] {NAMES[cid]:<40s} {len(d):>7d} 条  {cnt}'
-            + (f'  缺图剔除 {drops}' if any(drops.values()) else ''))
+        log(f'[config {cid:2d}] {NAMES[cid]:<40s} {len(d):>7d} entries  {cnt}'
+            + (f'  removed (no graph) {drops}' if any(drops.values()) else ''))
 
     json.dump(meta, open(meta_path, 'w'), indent=1, ensure_ascii=False)
-    log(f'\n产物 → {OUT}/{{config_XX.csv, configs.json}}')
+    log(f'\nOutputs → {OUT}/{{config_XX.csv, configs.json}}')
     return 0
 
 

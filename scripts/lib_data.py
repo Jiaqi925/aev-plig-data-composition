@@ -1,11 +1,16 @@
 #!/usr/bin/env python
 """
-阶段 5 数据层：从 04_graphs 的 .npy 内存映射按需构图（供训练与评测共用）。
+Stage 5 data layer: build graphs on demand from the memory-mapped .npy files
+of 04_graphs (shared by training and evaluation).
 
-设计要点：
-  · 不把 17 万个 PyG Data 对象常驻内存 —— 用 mmap 读大数组，__getitem__ 现切现建，
-    多个并发训练进程共享同一份操作系统页缓存。
-  · y 标准化沿用参考实现（StandardScaler，只用训练集拟合），推理时逆变换回 pK。
+Design notes:
+  · The 170k PyG Data objects are not kept resident in memory — the large
+    arrays are read via mmap and __getitem__ slices and builds each graph on
+    the fly, so several concurrent training processes share the same OS page
+    cache.
+  · y standardization follows the reference implementation (StandardScaler,
+    fitted on the training set only); predictions are inverse-transformed
+    back to pK at inference time.
 """
 import os
 import numpy as np
@@ -21,7 +26,8 @@ EDGE_DIM_RAW = 4
 
 
 class GraphStore:
-    """按源惰性挂载 04_graphs/<src>/*.npy，提供 (src, uid) → 图。"""
+    """Lazily mount 04_graphs/<src>/*.npy per source and provide
+    (src, uid) → graph."""
 
     def __init__(self, sources):
         self.a = {}
@@ -49,7 +55,7 @@ class GraphStore:
 
 
 class GraphDataset(torch.utils.data.Dataset):
-    """items: DataFrame(source, unique_id, y)；y 可为 NaN（纯推理）。"""
+    """items: DataFrame(source, unique_id, y); y may be NaN (inference)."""
 
     def __init__(self, store, items, y_scaler=None):
         self.store = store
@@ -74,13 +80,14 @@ class GraphDataset(torch.utils.data.Dataset):
 
 
 def fit_y_scaler(y):
-    """返回 (mean, std)；std 为 0 时退化为 1，避免除零。"""
+    """Return (mean, std); std falls back to 1 when it is 0, to avoid
+    division by zero."""
     m, s = float(np.mean(y)), float(np.std(y))
     return (m, s if s > 1e-12 else 1.0)
 
 
 def load_config(cid):
-    """读配置索引表 → DataFrame(source, unique_id, y)。"""
+    """Read a config index table → DataFrame(source, unique_id, y)."""
     p = f'{ROOT}/experiments/05_configs/config_{cid:02d}.csv'
     d = pd.read_csv(p)
     d = d.rename(columns={'pK': 'y'})
@@ -93,7 +100,8 @@ def config_meta():
 
 
 def load_testset(name, store):
-    """name ∈ {ood295, fep42}；返回 DataFrame(source, unique_id, y, ...原始列)。"""
+    """name ∈ {ood295, fep42}; returns DataFrame(source, unique_id, y,
+    ...original columns)."""
     M = f'{ROOT}/experiments/00_meta'
     if name == 'ood295':
         d = pd.read_csv(f'{M}/testset_ood295.csv')
@@ -107,5 +115,6 @@ def load_testset(name, store):
         raise ValueError(name)
     ok = d.unique_id.isin(store.available(name))
     if (~ok).any():
-        print(f'  ! {name}: {int((~ok).sum())} 条缺图，已排除', flush=True)
+        print(f'  ! {name}: {int((~ok).sum())} entries without graphs, '
+              f'excluded', flush=True)
     return d[ok].reset_index(drop=True)

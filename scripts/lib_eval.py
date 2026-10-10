@@ -1,21 +1,27 @@
 #!/usr/bin/env python
 """
-评估指标与统计推断（PLAN §6.2 / §6.3 / §6.5）。
+Evaluation metrics and statistical inference.
 
-  · PCC、Kendall τ_b
-  · FEP：逐系列相关系数 → 以配体数加权平均（wmPCC / wmKτ）
-  · 置信区间：BCa Bootstrap（偏差校正 + 加速），n=10,000
-      FEP  重采样单位 = 系列（保持系列内配体完整）
-      OOD  重采样单位 = 样本
-  · 配置间比较：配对差值的 BCa CI（PLAN §6.5 明确要求配对差值，不用区间重叠判断）
-  · Scaling Law：log-linear 拟合 + R²
+  · PCC, Kendall τ_b
+  · FEP: per-series correlation → mean weighted by number of ligands
+    (wmPCC / wmKτ)
+  · Confidence intervals: BCa confidence interval (bias-corrected and
+    accelerated bootstrap), n=10,000
+      FEP  resampling unit = series (ligands within a series kept intact)
+      OOD  resampling unit = sample
+  · Between-config comparison: BCa CI of the paired difference (the paired
+    difference is explicitly required; overlap of the two intervals is not
+    used as the criterion)
+  · Scaling law: log-linear fit + R²
 
-BCa 实现要点（与 Efron & Tibshirani 1993 一致）：
+BCa implementation notes (consistent with Efron & Tibshirani 1993):
   z0 = Φ⁻¹( #{θ*<θ̂} / B )
-  a  = Σ(θ̄_(·) − θ_(i))³ / (6·[Σ(θ̄_(·) − θ_(i))²]^{3/2})，θ_(i) 为留一 jackknife 值
-  α₁ = Φ( z0 + (z0+z_{α/2}) / (1 − a(z0+z_{α/2})) )，α₂ 同理用 z_{1−α/2}
-  CI = ( bootstrap 分位数 α₁, bootstrap 分位数 α₂ )
-退化保护：θ* 全等、或 jackknife 方差为 0 时，回退到百分位法并在结果中标注。
+  a  = Σ(θ̄_(·) − θ_(i))³ / (6·[Σ(θ̄_(·) − θ_(i))²]^{3/2}), where θ_(i) are the
+       leave-one-out jackknife values
+  α₁ = Φ( z0 + (z0+z_{α/2}) / (1 − a(z0+z_{α/2})) ), α₂ likewise with z_{1−α/2}
+  CI = ( bootstrap quantile α₁, bootstrap quantile α₂ )
+Degeneracy guard: when all θ* are equal, or the jackknife variance is 0, fall
+back to the percentile method and flag it in the result.
 """
 import numpy as np
 from scipy import stats
@@ -23,7 +29,7 @@ from scipy import stats
 N_BOOT = 10000
 
 
-# ───────────────────────────── 基础指标 ─────────────────────────────
+# ───────────────────────────── Basic metrics ─────────────────────────────
 
 def pcc(y, p):
     y, p = np.asarray(y, float), np.asarray(p, float)
@@ -33,7 +39,7 @@ def pcc(y, p):
 
 
 def ktau(y, p):
-    """Kendall τ_b（scipy 默认 variant='b'，对并列值有校正）。"""
+    """Kendall τ_b (scipy default variant='b', corrected for ties)."""
     y, p = np.asarray(y, float), np.asarray(p, float)
     if len(y) < 3:
         return np.nan
@@ -49,10 +55,10 @@ def mae(y, p):
     return float(np.mean(np.abs(np.asarray(y, float) - np.asarray(p, float))))
 
 
-# ─────────────────────── FEP：系列级 → 加权平均 ───────────────────────
+# ─────────────────── FEP: per-series → weighted mean ───────────────────
 
 def series_stats(series_ids, y, p):
-    """返回 list[(n_i, r_i, tau_i)]，逐系列计算。"""
+    """Return list[(n_i, r_i, tau_i)], computed per series."""
     series_ids = np.asarray(series_ids)
     y, p = np.asarray(y, float), np.asarray(p, float)
     out = []
@@ -68,7 +74,8 @@ def pd_unique(a):
 
 
 def weighted_mean(units, key):
-    """units: list[(n, r, tau, name)]；key ∈ {1,2} 选 r 或 tau。NaN 系列剔除并按剩余权重归一。"""
+    """units: list[(n, r, tau, name)]; key ∈ {1,2} selects r or tau. Series
+    with NaN are dropped and the remaining weights renormalized."""
     n = np.array([u[0] for u in units], float)
     v = np.array([u[key] for u in units], float)
     ok = np.isfinite(v)
@@ -81,9 +88,10 @@ def weighted_mean(units, key):
 
 def bca_ci(units, stat_fn, n_boot=N_BOOT, alpha=0.05, seed=0):
     """
-    units    : 可重采样的独立单位列表（FEP 传系列元组，OOD 传样本索引）
-    stat_fn  : 接受 units 的子列表 → 标量统计量
-    返回 dict(point, lo, hi, method)
+    units    : list of independent resamplable units (series tuples for FEP,
+               sample indices for OOD)
+    stat_fn  : takes a sublist of units → scalar statistic
+    Returns dict(point, lo, hi, method)
     """
     units = list(units)
     n = len(units)
@@ -100,12 +108,12 @@ def bca_ci(units, stat_fn, n_boot=N_BOOT, alpha=0.05, seed=0):
                 'hi': float(np.nanmax(boot)) if len(boot) else np.nan,
                 'method': 'degenerate'}
 
-    # 偏差校正 z0
+    # Bias correction z0
     frac = float(np.mean(boot < theta))
     frac = min(max(frac, 1.0 / (2 * len(boot))), 1 - 1.0 / (2 * len(boot)))
     z0 = stats.norm.ppf(frac)
 
-    # 加速 a（留一 jackknife）
+    # Acceleration a (leave-one-out jackknife)
     jack = np.array([stat_fn([units[i] for i in range(n) if i != k]) for k in range(n)], float)
     jack = jack[np.isfinite(jack)]
     d = jack.mean() - jack
@@ -124,10 +132,10 @@ def bca_ci(units, stat_fn, n_boot=N_BOOT, alpha=0.05, seed=0):
     return {'point': float(theta), 'lo': out['lo'], 'hi': out['hi'], 'method': method}
 
 
-# ───────────────── 面向两个评测集的封装 ─────────────────
+# ───────────────── Wrappers for the two evaluation sets ─────────────────
 
 def fep_metrics(series_ids, y, p, n_boot=N_BOOT, seed=0):
-    """wmPCC / wmKτ + 系列级 BCa CI。"""
+    """wmPCC / wmKτ + series-level BCa CI."""
     units = series_stats(series_ids, y, p)
     res = {'n_series': len(units), 'n_ligands': int(sum(u[0] for u in units)),
            'per_series': [{'series': u[3], 'n': u[0], 'pcc': u[1], 'ktau': u[2]}
@@ -138,7 +146,7 @@ def fep_metrics(series_ids, y, p, n_boot=N_BOOT, seed=0):
 
 
 def ood_metrics(y, p, n_boot=N_BOOT, seed=0):
-    """PCC / Kendall τ_b / RMSE / MAE + 样本级 BCa CI。"""
+    """PCC / Kendall τ_b / RMSE / MAE + sample-level BCa CI."""
     y, p = np.asarray(y, float), np.asarray(p, float)
     units = list(zip(y, p))
     f = {'PCC': lambda U: pcc([u[0] for u in U], [u[1] for u in U]),
@@ -149,12 +157,13 @@ def ood_metrics(y, p, n_boot=N_BOOT, seed=0):
                             for i, (k, fn) in enumerate(f.items())}}
 
 
-# ───────────────── 配置间配对比较（PLAN §6.5） ─────────────────
+# ───────────────── Paired comparison between configs ─────────────────
 
 def paired_diff_ci(units_a, units_b, stat_fn, n_boot=N_BOOT, alpha=0.05, seed=0):
     """
-    两配置在**同一批单位**上的差值 CI：重采样时两配置用同一组下标，
-    保证配对性。units_a[i] 与 units_b[i] 必须对应同一个单位。
+    CI of the difference between two configs on **the same set of units**:
+    both configs use the same resampled indices, which preserves the pairing.
+    units_a[i] and units_b[i] must correspond to the same unit.
     """
     assert len(units_a) == len(units_b)
     pair = list(zip(units_a, units_b))
@@ -164,7 +173,7 @@ def paired_diff_ci(units_a, units_b, stat_fn, n_boot=N_BOOT, alpha=0.05, seed=0)
 
 
 def scaling_fit(sizes, values):
-    """log-linear 拟合 value = k·log10(size) + b，返回 k、b、R²。"""
+    """Log-linear fit value = k·log10(size) + b; returns k, b, R²."""
     s = np.log10(np.asarray(sizes, float))
     v = np.asarray(values, float)
     ok = np.isfinite(s) & np.isfinite(v)
