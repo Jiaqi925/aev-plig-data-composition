@@ -1,47 +1,66 @@
 #!/usr/bin/env python
 """
-阶段 4：七源统一图特征生成（AEV + PLIG 节点/边特征）。
+Stage 4: unified graph feature generation for all seven sources (AEV + PLIG
+node/edge features).
 
-七个源：pdbbind / bindingnet / bindingdb_dcs / hiqbind / gatoraffinity（训练侧）
-        ood295 / fep42（评测侧）
+Seven sources: pdbbind / bindingnet / bindingdb_dcs / hiqbind / gatoraffinity
+               (training side)
+               ood295 / fep42 (evaluation side)
 
-**严格镜像 AEV-PLIG 参考实现**（generate_pdbbind_graphs.py、generate_bindingnet_graphs.py、
-generate_bindingdb_graphs.py）：LoadMolasDF / LoadPDBasDF / atom_features / mol_to_graph
-四个函数逐字复制；GetMolAEVs_extended 只做一处工程改动——把 AEVComputer 与
-SpeciesConverter 缓存到进程级（参考实现每个复合物重建一次，纯浪费），数值完全一致。
+**Strictly mirrors the AEV-PLIG reference implementation**
+(generate_pdbbind_graphs.py, generate_bindingnet_graphs.py,
+generate_bindingdb_graphs.py): the four functions LoadMolasDF / LoadPDBasDF /
+atom_features / mol_to_graph are copied verbatim; GetMolAEVs_extended has a
+single engineering change — AEVComputer and SpeciesConverter are cached at
+process level (the reference implementation rebuilds them for every complex,
+which is pure waste); the numerical results are identical.
 
-统一 ANI-2x 参数（与参考实现、PLAN §5 一致）：
-  RcR=5.1, EtaR=[19.7], RsR=16 档 0.80…4.83, RcA=2.0, Zeta=TsA=EtaA=RsA=[1.0]，
-  22 原子类型，**仅保留径向项** → AEV 宽度 22×16 = 352。
-  节点特征 = 15 维 PLIG 特征 + 352 维 AEV = 367；边特征 = 键型 one-hot 4 维。
+Unified ANI-2x parameters (consistent with the reference implementation):
+  RcR=5.1, EtaR=[19.7], RsR=16 bins 0.80…4.83, RcA=2.0,
+  Zeta=TsA=EtaA=RsA=[1.0], 22 atom types, **radial terms only** → AEV width
+  22×16 = 352.
+  Node features = 15-dim PLIG features + 352-dim AEV = 367; edge features =
+  4-dim bond-type one-hot.
 
-配体读取规则（覆盖参考实现的两种口径，且不引入新口径）：
-  · mol2：Chem.MolFromMol2File + AddHs(addCoords=True)   —— 同 pdbbind / bindingdb 参考
-  · sdf ：SDMolSupplier(removeHs=False)                   —— 同 bindingnet 参考
-          若读到的分子**不含显式氢**，再 AddHs(addCoords=True)。
-          原因：total_num_Hs 节点特征数的是氢邻居，无氢则该特征恒为 0，属特征损坏。
-          bindingnet 的 sdf 自带氢，故此分支对参考实现的复现无影响。
+Ligand reading rules (cover both conventions of the reference implementation
+without introducing a new one):
+  · mol2: Chem.MolFromMol2File + AddHs(addCoords=True)   — as in the pdbbind /
+          bindingdb reference
+  · sdf : SDMolSupplier(removeHs=False)                   — as in the
+          bindingnet reference
+          If the molecule read **has no explicit hydrogens**,
+          AddHs(addCoords=True) is applied as well.
+          Reason: the total_num_Hs node feature counts hydrogen neighbors;
+          without hydrogens it is constantly 0, i.e. a corrupted feature.
+          BindingNet's sdf files already contain hydrogens, so this branch has
+          no effect on reproducing the reference implementation.
 
-存储格式（不用 pickle 存 dict——173k 个复合物的 Python 对象开销与加载时间都不可接受）：
+Storage format (no pickled dict — for 173k complexes, both the Python object
+overhead and the load time are unacceptable):
   graphs/{source}/*.npy
-    x        float32 (总节点数, 367)     所有图的节点特征纵向拼接
-    node_ptr int64   (N+1,)              第 i 图节点 = x[node_ptr[i]:node_ptr[i+1]]
-    ei       int32   (2, 总边数)         图内局部索引
-    ea       uint8   (总边数, 4)         键型 one-hot
+    x        float32 (total nodes, 367)  node features of all graphs, stacked
+                                         vertically
+    node_ptr int64   (N+1,)              nodes of graph i =
+                                         x[node_ptr[i]:node_ptr[i+1]]
+    ei       int32   (2, total edges)    local indices within each graph
+    ea       uint8   (total edges, 4)    bond-type one-hot
     edge_ptr int64   (N+1,)
-    ids      <U…     (N,)                unique_id，与索引表对齐
-  训练时用 np.load(mmap_mode='r') 惰性读取，切片建 PyG Data，内存占用与 batch 同阶。
+    ids      <U…     (N,)                unique_id, aligned with index table
+  At training time the arrays are read lazily via np.load(mmap_mode='r') and
+  sliced into PyG Data objects, so memory use is of the same order as a batch.
 
-用法：
-  python 04_generate_graphs.py                 # 全部七源
+Usage:
+  python 04_generate_graphs.py                 # all seven sources
   python 04_generate_graphs.py --sources fep42 ood295
-  python 04_generate_graphs.py --limit 200     # 冒烟测试：每源只跑 200 条
+  python 04_generate_graphs.py --limit 200     # smoke test: 200 per source
 """
 import os, sys, json, argparse, pickle
 
-# 必须在 import numpy / torch 之前限制 BLAS/OpenMP 线程数：
-# 本脚本靠多进程并行，每个进程再开 N 个数学库线程会导致严重超订
-# （实测 96 进程时单条耗时被放大 11 倍，吞吐从 26 it/s 掉到 2.3 it/s）
+# BLAS/OpenMP thread counts must be limited before importing numpy / torch:
+# this script relies on multiprocessing, and each process opening N math
+# library threads on top causes severe oversubscription
+# (measured with 96 processes: per-entry time inflated 11x, throughput dropped
+# from 26 it/s to 2.3 it/s)
 for _v in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
            'NUMEXPR_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS'):
     os.environ.setdefault(_v, '1')
@@ -50,8 +69,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-# torchani_mod 是 AEV-PLIG 仓库内的改版 TorchANI（提供 aev_computer 的原子对 AEV 输出），
-# 未安装到 site-packages，必须先把仓库根目录挂到 sys.path
+# torchani_mod is the modified TorchANI inside the AEV-PLIG repo (it provides
+# the atom-pair AEV output of aev_computer); it is not installed in
+# site-packages, so the repo root must be added to sys.path first
 sys.path.insert(0, os.path.join(os.environ.get('STACEY_ROOT',
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'AEV-PLIG'))
 import torchani
@@ -71,7 +91,7 @@ DS = f'{ROOT}/datasets/structure'
 OUT = f'{ROOT}/experiments/04_graphs'
 log = lambda *a: print(*a, flush=True)
 
-# ANI-2x 径向参数
+# ANI-2x radial parameters
 RcR = 5.1
 EtaR = torch.tensor([19.7])
 RsR = torch.tensor([0.80, 1.07, 1.34, 1.61, 1.88, 2.14, 2.41, 2.68,
@@ -81,10 +101,10 @@ N_ATOM_TYPES = 22
 AEV_DIM = N_ATOM_TYPES * len(EtaR) * len(RsR)     # 352
 NODE_DIM = 15 + AEV_DIM                           # 367
 
-_G = {}          # 进程级缓存
+_G = {}          # process-level cache
 
 
-# ══════════════ 以下四个函数逐字复制自 generate_pdbbind_graphs.py ══════════════
+# ══ Next four functions copied verbatim from generate_pdbbind_graphs.py ══
 
 def LoadMolasDF(mol):
     m = mol
@@ -165,7 +185,8 @@ def mol_to_graph(mol, mol_df, aevs):
             df[['single', 'aromatic', 'double', 'triple']].to_numpy().tolist())
 
 
-# ══════════ AEV 计算：数值同参考实现，仅把两个 computer 缓存到进程级 ══════════
+# ══ AEV computation: numerically identical to the reference implementation; ══
+# ══ only the two computers are cached at process level                      ══
 
 def _init_worker():
     ak = pd.read_csv(f'{AEVDIR}/data/PDB_Atom_Keys.csv', sep=',')
@@ -183,9 +204,12 @@ def _init_worker():
 
 
 def _load_pdb_cached(path):
-    """同一蛋白常被同源系列的多个配体复用（FEP 42 蛋白 / 1087 配体、
-    BindingNet 5816 蛋白 / 67989 配体），解析一次约 0.5 s，占单条总耗时 14%。
-    manifest 已按蛋白路径排序 + chunksize=8，同一 worker 连续命中，单项缓存足够。"""
+    """The same protein is often reused by many ligands of one congeneric
+    series (FEP set: 42 protein structures / 1087 ligands; BindingNet: 5816
+    proteins / 67989 ligands). Parsing one takes about 0.5 s, 14% of the
+    total per-entry time. The manifest is already sorted by protein path
+    with chunksize=8, so the same worker gets consecutive hits and a
+    single-entry cache suffices."""
     c = _G.get('pdb_cache')
     if c is not None and c[0] == path:
         return c[1]
@@ -214,14 +238,16 @@ def GetMolAEVs_extended(protein_path, mol):
     return Ligand, aev.aevs.squeeze(0)[:mol_len, :AEV_DIM]
 
 
-# ────────────────────────────── 配体读取 ──────────────────────────────
+# ────────────────────────────── Ligand reading ──────────────────────────────
 
 def read_ligand(path, fmt, idx=-1):
     if fmt == 'mol2':
         m = Chem.MolFromMol2File(path)
         if m is None:
-            # PDBbind 的部分 mol2 有 RDKit 无法解析的原子类型/价态（如 3ip8、2fzc），
-            # 官方发布同时提供 .sdf，回退读它 —— 同一构象、同一坐标，不引入任何差异。
+            # Some PDBbind mol2 files have atom types/valences RDKit cannot
+            # parse (e.g. 3ip8, 2fzc). The official release also ships an
+            # .sdf, so fall back to it — same conformer, same coordinates, no
+            # difference introduced.
             alt = path[:-5] + '.sdf' if path.endswith('.mol2') else None
             if alt and os.path.exists(alt):
                 return read_ligand(alt, 'sdf', 0)
@@ -255,7 +281,7 @@ def work(t):
         return uid, None, f'{type(e).__name__}: {e}'[:200]
 
 
-# ──────────────────────────── 各源清单 ────────────────────────────
+# ────────────────────────── Per-source manifests ──────────────────────────
 
 def manifest(src, limit=0):
     E = f'{ROOT}/experiments'
@@ -298,13 +324,15 @@ def manifest(src, limit=0):
                 for s, i, pp, ls in zip(d.series, d.lig_idx, d.protein_pdb, d.ligand_sdf)]
     else:
         raise ValueError(src)
-    # 同一 unique_id 只算一次（DCS/HiQBind 理论上唯一，防御性去重）
+    # Count each unique_id only once (DCS/HiQBind should be unique in theory;
+    # defensive deduplication)
     seen, uniq = set(), []
     for r in rows:
         if r[0] not in seen:
             seen.add(r[0]); uniq.append(r)
     uniq = uniq[:limit] if limit else uniq
-    # 按蛋白路径排序，让同一蛋白的配体落进同一个 chunk，命中 _load_pdb_cached
+    # Sort by protein path so ligands of the same protein land in the same
+    # chunk and hit _load_pdb_cached
     uniq.sort(key=lambda r: (r[1], r[0]))
     return uniq
 
@@ -312,7 +340,7 @@ def manifest(src, limit=0):
 def run_source(src, nproc, limit=0):
     from multiprocessing import Pool
     rows = manifest(src, limit)
-    log(f'\n[{src}] {len(rows)} 个复合物')
+    log(f'\n[{src}] {len(rows)} complexes')
     res, fails = {}, []
     with Pool(nproc, initializer=_init_worker) as p:
         for uid, g, err in tqdm(p.imap_unordered(work, rows, chunksize=8),
@@ -329,8 +357,9 @@ def run_source(src, nproc, limit=0):
     eas = [res[i][2] for i in ids]
     node_ptr = np.concatenate([[0], np.cumsum([x.shape[0] for x in xs])]).astype(np.int64)
     edge_ptr = np.concatenate([[0], np.cumsum([e.shape[1] for e in eis])]).astype(np.int64)
-    # 存成**独立 .npy**（不是 .npz）—— np.load 的 mmap_mode 对 zip 容器无效，
-    # 分开存才能真正内存映射，5 个并发训练进程共享同一份页缓存。
+    # Save as **separate .npy files** (not .npz) — np.load's mmap_mode has no
+    # effect on zip containers; only separate files can truly be memory-mapped,
+    # letting 5 concurrent training processes share the same page cache.
     d = f'{OUT}/{src}'
     os.makedirs(d, exist_ok=True)
     np.save(f'{d}/x.npy', np.concatenate(xs, 0) if xs else np.zeros((0, NODE_DIM), np.float32))
@@ -341,12 +370,12 @@ def run_source(src, nproc, limit=0):
     np.save(f'{d}/ids.npy', np.array(ids))
     pd.DataFrame(fails, columns=['unique_id', 'error']).to_csv(
         f'{d}/failed.csv', index=False)
-    log(f'[{src}] 成功 {len(ids)} / {len(rows)}，失败 {len(fails)}'
-        f'；节点 {node_ptr[-1]}，边 {edge_ptr[-1]}'
-        f'，x 体积 {node_ptr[-1] * NODE_DIM * 4 / 2**30:.2f} GiB')
+    log(f'[{src}] succeeded {len(ids)} / {len(rows)}, failed {len(fails)}'
+        f'; nodes {node_ptr[-1]}, edges {edge_ptr[-1]}'
+        f', x size {node_ptr[-1] * NODE_DIM * 4 / 2**30:.2f} GiB')
     if fails:
         from collections import Counter
-        log(f'   失败原因 top5 {Counter(e for _, e in fails).most_common(5)}')
+        log(f'   top5 errors {Counter(e for _, e in fails).most_common(5)}')
     return {'n_in': len(rows), 'n_ok': len(ids), 'n_fail': len(fails),
             'n_nodes': int(node_ptr[-1]), 'n_edges': int(edge_ptr[-1])}
 
@@ -362,12 +391,13 @@ def main():
     ap.add_argument('--limit', type=int, default=0)
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
-    log(f'并行 {a.nproc}；节点维 {NODE_DIM} = 15 + {AEV_DIM}')
+    log(f'processes {a.nproc}; node dim {NODE_DIM} = 15 + {AEV_DIM}')
     rep = {}
     for s in a.sources:
         rep[s] = run_source(s, a.nproc, a.limit)
         json.dump(rep, open(f'{OUT}/report_04.json', 'w'), indent=1, ensure_ascii=False)
-    log(f'\n产物 → {OUT}/{{<source>/*.npy, <source>/failed.csv, report_04.json}}')
+    log(f'\nOutputs → {OUT}/{{<source>/*.npy, <source>/failed.csv, '
+        f'report_04.json}}')
     return 0
 
 

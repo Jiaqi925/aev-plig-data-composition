@@ -1,19 +1,26 @@
 #!/usr/bin/env python
 """
-阶段 2a：构建 HiQBind 索引（pK + 结构路径 + 评测集泄漏剔除）。
+Stage 2a: build the HiQBind index (pK + structure paths + evaluation-set
+leakage removal).
 
-严格依据 PLAN.md：
-  - 2.1 表1   HiQBind 原始规模 32,275（已核对 = sm 31,572 + poly 703）
-  - 3.2       HiQBind 去重：CleanSplit 三重标准；剔除与 OOD/FEP 在 PDB ID 层面重叠的样本
-  - 3.2       需统计净新增复合物数、唯一 UniProt 靶点数、配体 Bemis-Murcko 骨架数
+Requirements followed:
+  - HiQBind raw size: expected 32,275 (checked = sm 31,572 + poly 703)
+  - HiQBind deduplication: CleanSplit three-criterion standard; remove samples
+    that overlap with OOD/FEP at the PDB ID level
+  - Report the number of net new complexes, unique UniProt targets, and ligand
+    Bemis-Murcko scaffolds
 
-本脚本只做「解析 + pK + 删失过滤 + 结构配对 + 评测集剔除 + 统计」，
-CleanSplit 三重去重（需 TM-align）由 02b 脚本承接。
+This script only does "parsing + pK + censored-value filtering + structure
+pairing + evaluation-set removal + statistics"; the CleanSplit three-criterion
+deduplication (which needs TM-align) is handled by the 02c script.
 
-pK 规则（与 PLAN §2 决定一一致）：
-  - pK = -`Log Binding Affinity`（该列为 log10(M)，已验证与 value+unit 重算吻合，最大差 3.8e-13）
-  - 仅保留 `Binding Affinity Sign` == '=' 的精确测量值；剔除 ~ / > / >= / < / <= 的
-    删失或近似值。这与 DCS 上从参考实现反解出的口径一致（删失值整行剔除）。
+pK rules:
+  - pK = -`Log Binding Affinity` (that column is log10(M); verified to match
+    a recomputation from value+unit, max difference 3.8e-13)
+  - Only exact measurements with `Binding Affinity Sign` == '=' are kept;
+    censored or approximate values with ~ / > / >= / < / <= are removed. This
+    matches the convention reverse-engineered from the reference
+    implementation on DCS (rows with censored values are dropped entirely).
 """
 import os, json, sys
 import numpy as np
@@ -48,35 +55,36 @@ def main():
     rep = {}
     d = pd.read_csv(f'{IDX}/hiqbind_metadata.csv')
     n0 = len(d)
-    log(f'[HiQBind] 原始 {n0} 行（PLAN 表1 记载 32,275）')
+    log(f'[HiQBind] raw {n0} rows (expected 32,275)')
 
-    # 标记 sm / poly 来源，以便定位结构目录
+    # Tag the sm / poly origin so the structure directory can be located
     sm = set(pd.read_csv(f'{IDX}/hiqbind_sm_metadata.csv')
              .apply(lambda r: (r['PDBID'], r['Ligand Name'], r['Ligand Chain'],
                                r['Ligand Residue Number']), axis=1))
     key = d.apply(lambda r: (r['PDBID'], r['Ligand Name'], r['Ligand Chain'],
                              r['Ligand Residue Number']), axis=1)
     d['subset'] = np.where(key.isin(sm), 'sm', 'poly')
-    log(f'  子集 {d.subset.value_counts().to_dict()}')
+    log(f'  subsets {d.subset.value_counts().to_dict()}')
 
     # --- pK ---
     d['pK'] = -d['Log Binding Affinity']
     d['meas_type'] = d['Binding Affinity Measurement'].str.upper()
 
-    # --- 删失/近似值剔除 ---
+    # --- Remove censored/approximate values ---
     sign = d['Binding Affinity Sign'].astype(str).str.strip()
     exact = sign == '='
-    log(f'  Sign 分布 {sign.value_counts().to_dict()}')
-    log(f'  剔除非精确测量 {(~exact).sum()} 行 → 保留 {exact.sum()}')
+    log(f'  Sign distribution {sign.value_counts().to_dict()}')
+    log(f'  removed {(~exact).sum()} non-exact measurements '
+        f'→ kept {exact.sum()}')
     d = d[exact].copy()
 
-    # pK 有限性
+    # pK must be finite
     fin = np.isfinite(d['pK'])
     if (~fin).sum():
-        log(f'  剔除 pK 非有限 {(~fin).sum()} 行')
+        log(f'  removed {(~fin).sum()} rows with non-finite pK')
         d = d[fin].copy()
 
-    # --- 结构目录配对 ---
+    # --- Match structure directories ---
     d['complex_dir'] = (d['PDBID'].astype(str) + '_' + d['Ligand Name'].astype(str) + '_'
                         + d['Ligand Chain'].astype(str) + '_'
                         + d['Ligand Residue Number'].astype(str))
@@ -88,38 +96,42 @@ def main():
 
     has = [os.path.exists(a) and os.path.exists(b)
            for a, b in zip(d.ligand_sdf, d.protein_pdb)]
-    log(f'  结构文件齐备 {sum(has)} / {len(d)}（缺失 {len(d) - sum(has)}）')
+    log(f'  structure files complete {sum(has)} / {len(d)} '
+        f'(missing {len(d) - sum(has)})')
     rep['missing_structure'] = int(len(d) - sum(has))
     d = d[has].copy()
 
-    # --- 评测集泄漏剔除（PDB ID 前 4 位，PLAN §3.4.2）---
+    # --- Evaluation-set leakage removal (first 4 characters of PDB ID) ---
     ids = json.load(open(f'{META}/leakage_ids.json'))
     ood, fep = set(ids['ood_pdb_ids']), set(ids['fep_pdb_ids'])
     d['pdb_id'] = d['PDBID'].astype(str).str.lower().str[:4]
     hit_ood = d['pdb_id'].isin(ood)
     hit_fep = d['pdb_id'].isin(fep)
     hit = hit_ood | hit_fep
-    log(f'  泄漏剔除 {len(d)} → {(~hit).sum()}'
-        f'（命中 {hit.sum()}；OOD {hit_ood.sum()}、FEP {hit_fep.sum()}）')
+    log(f'  leakage removal {len(d)} → {(~hit).sum()}'
+        f' (hits {hit.sum()}; OOD {hit_ood.sum()}, FEP {hit_fep.sum()})')
     rep['leak_removed'] = {'total': int(hit.sum()), 'ood': int(hit_ood.sum()),
                            'fep': int(hit_fep.sum())}
     d = d[~hit].copy().reset_index(drop=True)
 
-    # --- 统计（PLAN §3.2 要求的三项）---
+    # --- Statistics (the three required items) ---
     d['unique_id'] = d['complex_dir']
     d['source'] = 'hiqbind'
-    log('  计算 Bemis-Murcko 骨架 …')
+    log('  computing Bemis-Murcko scaffolds …')
     d['scaffold'] = [scaffold(s) for s in d['Ligand SMILES']]
 
-    log(f'\n[HiQBind] 清洗后 {len(d)} 条')
-    log(f'  唯一 PDB ID        {d.pdb_id.nunique()}')
-    log(f'  唯一 UniProt 靶点  {d["Protein UniProtID"].nunique()}')
-    log(f'  唯一 Bemis-Murcko  {d.scaffold.nunique()}（解析失败 {d.scaffold.isna().sum()}）')
-    log(f'  pK 范围 {d.pK.min():.2f} ~ {d.pK.max():.2f}，均值 {d.pK.mean():.3f}')
-    log(f'  测量类型 {d.meas_type.value_counts().to_dict()}')
+    log(f'\n[HiQBind] {len(d)} entries after cleaning')
+    log(f'  unique PDB IDs         {d.pdb_id.nunique()}')
+    log(f'  unique UniProt targets {d["Protein UniProtID"].nunique()}')
+    log(f'  unique Bemis-Murcko    {d.scaffold.nunique()} '
+        f'(parse failures {d.scaffold.isna().sum()})')
+    log(f'  pK range {d.pK.min():.2f} ~ {d.pK.max():.2f}, '
+        f'mean {d.pK.mean():.3f}')
+    log(f'  measurement types {d.meas_type.value_counts().to_dict()}')
     res = pd.to_numeric(d['Resolution'], errors='coerce')
-    log(f'  分辨率 中位 {res.median():.2f} Å，>2.5 Å 的有 {(res > 2.5).sum()} 条'
-        f'（缺失 {res.isna().sum()}）')
+    log(f'  resolution median {res.median():.2f} Å, '
+        f'{(res > 2.5).sum()} entries > 2.5 Å'
+        f' (missing {res.isna().sum()})')
 
     rep.update({'raw': int(n0), 'after_clean': int(len(d)),
                 'unique_pdb': int(d.pdb_id.nunique()),
@@ -132,7 +144,7 @@ def main():
             'Protein UniProtID', 'Ligand SMILES', 'scaffold', 'ligand_sdf', 'protein_pdb']
     d[cols].to_csv(f'{OUT}/hiqbind_clean.csv', index=False)
     json.dump(rep, open(f'{OUT}/report_02a.json', 'w'), indent=1, ensure_ascii=False)
-    log(f'\n产物 → {OUT}/hiqbind_clean.csv')
+    log(f'\nOutputs → {OUT}/hiqbind_clean.csv')
     return 0
 
 

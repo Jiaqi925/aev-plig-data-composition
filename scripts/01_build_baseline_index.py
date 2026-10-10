@@ -1,21 +1,31 @@
 #!/usr/bin/env python
 """
-阶段 1：构建 Baseline 三源索引（PDBbind + BindingNet + BindingDB-DCS）并执行评测集泄漏剔除。
+Stage 1: build the Baseline three-source index (PDBbind + BindingNet +
+BindingDB-DCS) and perform evaluation-set leakage removal.
 
-严格依据 PLAN.md：
-  - 2.1 表1  原始规模：PDBbind 19,443 / BindingNet 69,816 / DCS 8,822
-  - 3.1      基线三源直接拼接，不执行去重
-  - 3.4.2    以 PDB ID（前 4 位）为统一键，剔除 OOD(295) 与 FEP(42 系列) 涉及的样本
+Requirements followed:
+  - Raw sizes: expected PDBbind 19,443 / BindingNet 69,816 / DCS 8,822
+  - The three baseline sources are concatenated directly, without
+    deduplication
+  - PDB ID (first 4 characters) is the unified key; samples involved in
+    OOD (295) and FEP (42 series) are removed
 
-pK 换算规则（反解自 AEV-PLIG 参考实现 data/bindingdb_processed.csv，
-在全部 8,822 行上 100% 复现，故沿用而非另立标准）：
-  1. 测量类型优先级 Kd > Ki > IC50，取优先级最高且有值的一列
-  2. 该列内可能有多个分号分隔的浓度值，各自换算为 p 值后取中位数
-  3. p = 9 - log10(浓度 nM)；浓度为 0 时 p = +inf
-  4. 剔除含不等号（> 或 <）的删失值行
-  5. 仅当中位数非有限时剔除该行。中位数对个别 0 值天然稳健（inf 只排到序列末端，
-     不影响中位数取值），这与参考实现的行为逐行一致。
-PDBbind 与 BindingNet 的索引已自带 pK 列，直接沿用，不重新换算。
+pK conversion rules (reverse-engineered from the AEV-PLIG reference
+implementation's data/bindingdb_processed.csv and reproduced 100% on all
+8,822 rows, hence adopted rather than defining a separate standard):
+  1. Measurement-type priority Kd > Ki > IC50; take the highest-priority
+     column that has a value
+  2. That column may hold several semicolon-separated concentrations; each is
+     converted to a p value and the median is taken
+  3. p = 9 - log10(concentration in nM); p = +inf when the concentration is 0
+  4. Rows with censored values containing an inequality sign (> or <) are
+     removed
+  5. A row is removed only if the median is non-finite. The median is
+     naturally robust to the occasional 0 value (inf is only sorted to the
+     end of the sequence and does not affect the median), which matches the
+     reference implementation's behavior row by row.
+The PDBbind and BindingNet indices already include a pK column, which is used
+as-is without reconversion.
 """
 import os, re, glob, json, sys
 import numpy as np
@@ -57,8 +67,8 @@ def build_pdbbind():
     d['pdb_id']  = d['PDB_code'].str.lower()
     d['source']  = 'pdbbind'
     d['unique_id'] = d['PDB_code']
-    log(f'[PDBbind] 原始 {len(d)} 条 (refined {d.refined.sum()})，'
-        f'类型 {d.meas_type.value_counts().to_dict()}')
+    log(f'[PDBbind] raw {len(d)} entries (refined {d.refined.sum()}), '
+        f'types {d.meas_type.value_counts().to_dict()}')
     return d
 
 
@@ -72,7 +82,7 @@ def build_bindingnet():
     d['ligand_chembl'] = parts.str[2]
     d['source']    = 'bindingnet'
     d['unique_id'] = d['unique_identify']
-    log(f'[BindingNet] 原始 {len(d)} 条，唯一 PDB {d.pdb_id.nunique()}')
+    log(f'[BindingNet] raw {len(d)} entries, unique PDB {d.pdb_id.nunique()}')
     return d
 
 
@@ -80,7 +90,8 @@ def build_bindingnet():
 CENSORED = re.compile(r'[<>]')
 
 def dcs_pk(field):
-    """按规则把一个 'a;b;c' 浓度字段换算为 pK；返回 (pK, 原因)。"""
+    """Convert one 'a;b;c' concentration field to pK according to the rules;
+    return (pK, reason)."""
     vals = [t.strip() for t in str(field).split(';') if t.strip()]
     if any(CENSORED.search(v) for v in vals):
         return None, 'censored'
@@ -101,7 +112,7 @@ def build_dcs():
     recs, drop = [], {'censored': 0, 'non_finite_pK': 0, 'negative': 0, 'unparsable': 0,
                       'no_affinity': 0, 'mol2_unreadable': 0, 'mol2_missing': 0}
     files = sorted(glob.glob(f'{IDX}/_bindingdb_series/*.csv'))
-    log(f'[DCS] 系列 csv {len(files)} 个')
+    log(f'[DCS] {len(files)} series csv files')
     for fp in files:
         base = os.path.basename(fp)[:-4]
         folder, pdb = base.split('__')
@@ -113,7 +124,8 @@ def build_dcs():
                 continue
             mol2 = m.group(1)
 
-            # 任一列出现删失值即整行剔除（与参考实现一致）
+            # A censored value in any column drops the whole row (same as the
+            # reference implementation)
             if any(CENSORED.search(str(r[c])) for c in ('Ki(nM)', 'IC50(nM)', 'Kd(nM)')
                    if pd.notna(r[c])):
                 drop['censored'] += 1
@@ -146,17 +158,18 @@ def build_dcs():
     d = pd.DataFrame(recs, columns=['folder', 'pdb', 'mol2_file', 'unique_id', 'pK', 'meas_type'])
     d['pdb_id'] = d['pdb'].str.lower()
     d['source'] = 'bindingdb_dcs'
-    log(f'[DCS] 保留 {len(d)} 条，系列 {d.folder.nunique()} 个，剔除明细 {drop}')
+    log(f'[DCS] kept {len(d)} entries, {d.folder.nunique()} series, '
+        f'removal breakdown {drop}')
     rep['dcs_drop'] = drop
     return d
 
 
-# ----------------------------------------------------------------------------- 泄漏剔除
+# ----------------------------------------------------------------------------- Leakage removal
 def main():
     ids = json.load(open(f'{META}/leakage_ids.json'))
     excl = set(ids['excluded_pdb_ids'])
-    log(f'需剔除 PDB ID：OOD {len(ids["ood_pdb_ids"])} + FEP {len(ids["fep_pdb_ids"])} '
-        f'→ 并集 {len(excl)}')
+    log(f'PDB IDs to remove: OOD {len(ids["ood_pdb_ids"])} '
+        f'+ FEP {len(ids["fep_pdb_ids"])} → union {len(excl)}')
 
     out = {}
     for name, fn in (('pdbbind', build_pdbbind),
@@ -168,8 +181,8 @@ def main():
         d_clean = d[~hit].reset_index(drop=True)
         n_ood = d['pdb_id'].isin(set(ids['ood_pdb_ids'])).sum()
         n_fep = d['pdb_id'].isin(set(ids['fep_pdb_ids'])).sum()
-        log(f'[{name}] 泄漏剔除 {n0} → {len(d_clean)} '
-            f'(命中 {hit.sum()}；其中 OOD {n_ood}、FEP {n_fep})')
+        log(f'[{name}] leakage removal {n0} → {len(d_clean)} '
+            f'(hits {hit.sum()}; of which OOD {n_ood}, FEP {n_fep})')
         rep[name] = {'raw': int(n0), 'after_leak': int(len(d_clean)),
                      'removed': int(hit.sum()), 'hit_ood': int(n_ood), 'hit_fep': int(n_fep),
                      'unique_pdb_raw': int(d.pdb_id.nunique()),
@@ -178,8 +191,8 @@ def main():
         d_clean.to_csv(f'{OUT}/{name}_clean.csv', index=False)
         out[name] = d_clean
 
-    # 泄漏验证
-    log('\n=== 泄漏验证 ===')
+    # Leakage check
+    log('\n=== Leakage check ===')
     ok = True
     for name, d in out.items():
         i_ood = set(d.pdb_id) & set(ids['ood_pdb_ids'])
@@ -193,14 +206,16 @@ def main():
                       out['bindingdb_dcs'][['source', 'unique_id', 'pdb_id', 'pK']]],
                      ignore_index=True)
     base.to_csv(f'{OUT}/baseline_clean.csv', index=False)
-    log(f'\n[Baseline] 三源拼接（不去重）共 {len(base)} 条，唯一 PDB {base.pdb_id.nunique()}')
-    log(f'  pK 范围 {base.pK.min():.2f} ~ {base.pK.max():.2f}，均值 {base.pK.mean():.3f}')
-    log(f'  组成 {base.source.value_counts().to_dict()}')
+    log(f'\n[Baseline] three sources concatenated (no deduplication): '
+        f'{len(base)} entries, unique PDB {base.pdb_id.nunique()}')
+    log(f'  pK range {base.pK.min():.2f} ~ {base.pK.max():.2f}, '
+        f'mean {base.pK.mean():.3f}')
+    log(f'  composition {base.source.value_counts().to_dict()}')
 
     rep['baseline_total'] = int(len(base))
     rep['leak_check_pass'] = bool(ok)
     json.dump(rep, open(f'{OUT}/report.json', 'w'), indent=1, ensure_ascii=False)
-    log(f'\n报告 → {OUT}/report.json')
+    log(f'\nReport → {OUT}/report.json')
     return 0 if ok else 1
 
 
